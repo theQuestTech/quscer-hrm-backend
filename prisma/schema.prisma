@@ -1,0 +1,585 @@
+// ============================================================================
+// Quscer HRM — Phase 1 Foundation Schema
+// Standalone app for now. `Organization` and `User` are first-class here
+// rather than borrowed from quscer-backend — WBS task 6.1 ("Synchronize
+// Quscer user profile across subscribed apps") is what stitches this to the
+// main Quscer OS identity later. Until then, this app owns its own copies.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------------------------------
+// 1.3 — Tenancy
+// ----------------------------------------------------------------------------
+model Organization {
+  id                String   @id @default(cuid())
+  name              String
+  quscerOrgId       String?  @unique   // set once linked to Quscer OS (task 6.1) — null until then
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  users             User[]
+  branches          Branch[]
+  roles             Role[]
+  auditEvents       AuditEvent[]
+  employees         Employee[]
+  localeSettings    OrganizationLocaleSettings?
+
+  @@index([quscerOrgId])
+}
+
+model User {
+  id             String   @id @default(cuid())
+  organizationId String
+  quscerUserId   String?  @unique   // set once linked to Quscer OS (task 6.1) — null until then
+  email          String
+  passwordHash   String?           // null once auth is delegated to Quscer OS SSO
+  firstName      String
+  lastName       String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization         @relation(fields: [organizationId], references: [id])
+  roleAssignments UserRoleAssignment[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+}
+
+// ----------------------------------------------------------------------------
+// 1.7 / 1.8 — RBAC
+// Permission keys: "<product>.<resource>.<action>", e.g. "hrm.employee.read".
+// Effective permission = union of every role's permissions assigned to the
+// user (see Product Integration sheet: default deny, union across roles,
+// never infer HR access from sales access).
+// ----------------------------------------------------------------------------
+model Permission {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  description String?
+
+  rolePermissions RolePermission[]
+}
+
+model Role {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String            // "HR Admin", "Payroll Approver", "Manager", "Employee"
+  isSystemRole   Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  organization   Organization         @relation(fields: [organizationId], references: [id])
+  permissions    RolePermission[]
+  assignments    UserRoleAssignment[]
+
+  @@index([organizationId])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model UserRoleAssignment {
+  id             String   @id @default(cuid())
+  userId         String
+  roleId         String
+  organizationId String
+  assignedAt     DateTime @default(now())
+  assignedById   String?
+
+  user           User     @relation(fields: [userId], references: [id])
+  role           Role     @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, roleId])
+  @@index([userId, organizationId])
+}
+
+// ----------------------------------------------------------------------------
+// 1.9 — Shared immutable audit log (append-only by convention)
+// ----------------------------------------------------------------------------
+model AuditEvent {
+  id             String   @id @default(cuid())
+  organizationId String
+  actorUserId    String?
+  eventType      String            // "employee.created", "payroll.approved", etc.
+  entityType     String
+  entityId       String
+  metadata       Json     @default("{}")
+  createdAt      DateTime @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, entityType, entityId])
+  @@index([organizationId, createdAt])
+}
+
+// ----------------------------------------------------------------------------
+// 1.13 — Branches, departments, designations, cost centres
+// ----------------------------------------------------------------------------
+model Branch {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  countryCode    String            // ISO 3166-1 alpha-2, e.g. "PK"
+  regionCode     String?           // province/state code, e.g. "PB" | "SD" | "KP" | "BA"
+  timezone       String            // IANA tz, e.g. "Asia/Karachi"
+  isActive       Boolean  @default(true)
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  departments    Department[]
+  costCentres    CostCentre[]
+  employees      Employee[]
+
+  @@index([organizationId])
+}
+
+model Department {
+  id             String   @id @default(cuid())
+  organizationId String
+  branchId       String?
+  name           String
+  parentId       String?           // self-relation for nested departments
+
+  branch         Branch?  @relation(fields: [branchId], references: [id])
+  employees      Employee[]
+
+  @@index([organizationId])
+}
+
+model CostCentre {
+  id             String   @id @default(cuid())
+  organizationId String
+  branchId       String?
+  code           String            // shared with Invoicing's financial reports once connected
+  name           String
+
+  branch         Branch?  @relation(fields: [branchId], references: [id])
+
+  @@unique([organizationId, code])
+}
+
+// ----------------------------------------------------------------------------
+// 1.17 — Jurisdiction & multi-currency org settings
+// ----------------------------------------------------------------------------
+model OrganizationLocaleSettings {
+  organizationId       String   @id
+  defaultCountryCode   String            // ISO 3166-1 alpha-2, e.g. "PK"
+  defaultCurrency      String            // ISO 4217, e.g. "PKR"
+  defaultTimezone      String            // IANA tz
+  loadedStatutoryPacks String[]          // e.g. ["PK"] — which country packs are active
+  updatedAt            DateTime @updatedAt
+
+  organization         Organization @relation(fields: [organizationId], references: [id])
+}
+
+// Exchange-rate snapshot for DISPLAY/reporting only (WBS 4.3a). Payroll math
+// always runs in the employee's contracted currency — never a converted one.
+model CurrencyRateSnapshot {
+  id           String   @id @default(cuid())
+  fromCurrency String
+  toCurrency   String
+  rate         Decimal
+  asOf         DateTime
+
+  @@unique([fromCurrency, toCurrency, asOf])
+}
+
+// ----------------------------------------------------------------------------
+// 4.4 — Statutory Rule Engine (generic, jurisdiction-aware)
+// Pakistan's income tax / EOBI / provincial social security (4.4a, 4.5) are
+// ROWS here, not special-cased code. A second country means new rows, not
+// new code paths.
+// ----------------------------------------------------------------------------
+enum StatutoryRuleType {
+  INCOME_TAX
+  SOCIAL_SECURITY
+  PENSION_FUND
+  MINIMUM_WAGE
+}
+
+model StatutoryRule {
+  id            String            @id @default(cuid())
+  ruleType      StatutoryRuleType
+  countryCode   String                     // "PK"
+  regionCode    String?                    // "PB" | "SD" | "KP" | "BA" | null = national
+  skillTier     String?                    // "unskilled" | "semi_skilled" | "skilled"
+  effectiveFrom DateTime
+  effectiveTo   DateTime?                  // null = still current
+  // Shape varies by ruleType — see prisma/seed.ts for real examples:
+  //   INCOME_TAX:      { type: "slab", slabs: [{ upTo, rate }, ...], surchargeThreshold?, surchargeRate? }
+  //   PENSION_FUND:     { type: "flat_percent_of_min_wage", employerPct, employeePct }
+  //   SOCIAL_SECURITY:  { type: "percent_of_wage", employerPct, wageCeiling }
+  //   MINIMUM_WAGE:     { type: "flat_amount", amount, currency }
+  formula       Json
+  sourceRef     String?                    // citation: which budget/notification this came from
+  createdAt     DateTime          @default(now())
+
+  @@index([countryCode, regionCode, ruleType, effectiveFrom])
+}
+
+// ============================================================================
+// PHASE 4 CORE — Payroll & Benefits
+// Covers WBS 4.1-4.9 (salary structure, statutory engine consumption,
+// payroll run, maker-checker approval), 4.12 (loans). NOT built yet:
+// 4.10 (PDF payslip generation — line items are computed and queryable,
+// but no PDF rendering), 4.11 (bank file export), 4.13 (benefits/claims
+// beyond salary components), 4.14 (final settlement), 4.15 (accounting
+// journal — blocked on Invoicing connection anyway, task 6.4).
+// ============================================================================
+
+enum SalaryComponentType {
+  EARNING
+  DEDUCTION
+  EMPLOYER_CONTRIBUTION   // doesn't reduce net pay, but tracked for cost/reporting
+}
+
+// Org-level catalog — "Basic", "House Rent Allowance", "Transport Allowance",
+// "Provident Fund" etc. Individual employees get amounts via
+// EmployeeSalaryComponent, not by redefining the component each time.
+model SalaryComponent {
+  id             String              @id @default(cuid())
+  organizationId String
+  name           String
+  type           SalaryComponentType
+  isTaxable      Boolean             @default(true)
+
+  employeeComponents EmployeeSalaryComponent[]
+
+  @@unique([organizationId, name])
+}
+
+model EmployeeSalaryStructure {
+  id             String   @id @default(cuid())
+  employeeId     String   @unique
+  currency       String            // ISO 4217 — see CurrencyRateSnapshot for display conversion only
+  basicSalary    Decimal
+  effectiveFrom  DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  employee       Employee @relation(fields: [employeeId], references: [id])
+  components     EmployeeSalaryComponent[]
+}
+
+model EmployeeSalaryComponent {
+  id                String  @id @default(cuid())
+  salaryStructureId String
+  componentId       String
+  amount            Decimal           // flat amount per pay period, in the structure's currency
+
+  salaryStructure   EmployeeSalaryStructure @relation(fields: [salaryStructureId], references: [id], onDelete: Cascade)
+  component         SalaryComponent         @relation(fields: [componentId], references: [id])
+
+  @@unique([salaryStructureId, componentId])
+}
+
+enum PayrollRunStatus {
+  DRAFT
+  SUBMITTED    // maker has run it, awaiting checker
+  APPROVED     // checker approved — loan balances decremented, immutable from here
+  LOCKED       // paid out, fully immutable
+}
+
+model PayrollRun {
+  id              String   @id @default(cuid())
+  organizationId  String
+  periodStart     DateTime
+  periodEnd       DateTime
+  payDate         DateTime
+  status          PayrollRunStatus @default(DRAFT)
+  runByUserId     String?
+  submittedAt     DateTime?
+  approvedByUserId String?
+  approvedAt      DateTime?
+  createdAt       DateTime @default(now())
+
+  lineItems       PayrollLineItem[]
+
+  @@unique([organizationId, periodStart, periodEnd])
+  @@index([organizationId, status])
+}
+
+model PayrollLineItem {
+  id              String   @id @default(cuid())
+  payrollRunId    String
+  employeeId      String
+  currency        String
+  grossSalary     Decimal
+  totalEarnings   Decimal
+  totalDeductions Decimal
+  netSalary       Decimal
+  // breakdown: [{ label, type: "earning"|"statutory_deduction"|"loan_deduction"|"employer_contribution", amount, sourceRef? }]
+  // sourceRef on statutory lines points back to the StatutoryRule.id used —
+  // makes every payslip line traceable to the exact rule version applied.
+  breakdown       Json
+  createdAt       DateTime @default(now())
+
+  payrollRun      PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employee        Employee   @relation(fields: [employeeId], references: [id])
+
+  @@unique([payrollRunId, employeeId])
+}
+
+enum LoanStatus {
+  ACTIVE
+  CLOSED
+}
+
+model EmployeeLoan {
+  id                String     @id @default(cuid())
+  employeeId        String
+  principal         Decimal
+  installmentAmount Decimal
+  remainingBalance  Decimal
+  status            LoanStatus @default(ACTIVE)
+  startDate         DateTime
+  createdAt         DateTime   @default(now())
+
+  employee          Employee @relation(fields: [employeeId], references: [id])
+}
+
+// ============================================================================
+// PHASE 2 — Core HR & Employee Lifecycle
+// Covers WBS 2.1 (profile/CRUD), 2.2 (status/type), 2.3 (contacts/bank),
+// 2.4 (contracts/probation, basic fields only — full workflow is later),
+// 2.5 (documents), 2.6 (manager hierarchy). Onboarding/offboarding
+// workflows (2.7-2.9), assets (2.10), letters (2.11), bulk import (2.13),
+// custom fields (2.14) and history (2.15) are NOT built yet — this is the
+// core record those depend on.
+// ============================================================================
+
+enum EmployeeStatus {
+  ACTIVE
+  ON_LEAVE
+  SUSPENDED
+  TERMINATED
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERN
+}
+
+model Employee {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String?  @unique          // set only if this employee also has app login access
+  branchId       String?
+  departmentId   String?
+  managerId      String?                   // self-relation — WBS 2.6
+
+  employeeNumber String                    // unique per org, see @@unique below
+  firstName      String
+  lastName       String
+  email          String
+  phone          String?
+  designation    String                    // job title, free text for now
+
+  status         EmployeeStatus   @default(ACTIVE)
+  employmentType EmploymentType   @default(FULL_TIME)
+
+  dateOfJoining     DateTime
+  probationEndDate  DateTime?              // WBS 2.4 — basic field, not a full workflow yet
+  confirmedAt       DateTime?
+  contractEndDate   DateTime?              // for CONTRACT/INTERN types
+
+  // Statutory context — defaults from Branch if not overridden per-employee.
+  // Read by the Phase 4 payroll engine against StatutoryRule.
+  countryCode    String?
+  regionCode     String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  branch          Branch?      @relation(fields: [branchId], references: [id])
+  department      Department?  @relation(fields: [departmentId], references: [id])
+  manager         Employee?    @relation("ManagerToReports", fields: [managerId], references: [id])
+  directReports   Employee[]   @relation("ManagerToReports")
+
+  emergencyContacts EmergencyContact[]
+  documents         EmployeeDocument[]
+  bankDetail        EmployeeBankDetail?
+  attendanceRecords AttendanceRecord[]
+  leaveBalances     LeaveBalance[]
+  leaveRequests     LeaveRequest[]
+  salaryStructure   EmployeeSalaryStructure?
+  payrollLineItems  PayrollLineItem[]
+  loans             EmployeeLoan[]
+
+  @@unique([organizationId, employeeNumber])
+  @@index([organizationId, status])
+  @@index([managerId])
+}
+
+// WBS 2.3 — emergency contacts / dependants
+model EmergencyContact {
+  id           String  @id @default(cuid())
+  employeeId   String
+  name         String
+  relationship String            // "Spouse", "Parent", "Sibling", etc. — free text, not an enum
+  phone        String
+  isPrimary    Boolean @default(false)
+
+  employee     Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+}
+
+// WBS 2.5 — documents, categories, expiry tracking
+model EmployeeDocument {
+  id         String    @id @default(cuid())
+  employeeId String
+  category   String              // "CNIC", "Contract", "Degree", etc. — free text for now
+  fileUrl    String              // storage URL — actual upload/storage service not built yet
+  expiryDate DateTime?
+  uploadedAt DateTime  @default(now())
+
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@index([employeeId, expiryDate])
+}
+
+// WBS 2.3 — bank details. accountNumber should be encrypted at rest before
+// this goes anywhere near production (WBS 6.12 — "encrypt sensitive
+// payroll/bank fields") — stored as plain String here as a placeholder only.
+model EmployeeBankDetail {
+  id            String @id @default(cuid())
+  employeeId    String @unique
+  bankName      String
+  accountTitle  String
+  accountNumber String            // TODO: encrypt before production use (task 6.12)
+  branchCode    String?
+
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+}
+
+// ============================================================================
+// PHASE 3 CORE — Attendance & Leave
+// Covers WBS 3.1 (shift templates, simplified), 3.2 (check-in/check-out),
+// 3.8 (leave types), 3.9 (leave balance, simplified — no accrual/proration
+// engine yet, just allocated vs. used), 3.10 (leave request + approval).
+// NOT built yet: manual-correction workflow (3.3), overtime calculation
+// (3.4), IP/geofence capture (3.5), biometric adapter (3.6), timesheets
+// (3.7), combined calendar (3.11), regularization (3.12), report APIs (3.13).
+// ============================================================================
+
+model Shift {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String            // "General Shift", "Night Shift"
+  startTime      String            // "09:00" — 24h HH:mm, timezone comes from the employee's Branch
+  endTime        String            // "18:00"
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  HALF_DAY
+  ON_LEAVE
+}
+
+enum AttendanceSource {
+  MANUAL
+  APP_CHECKIN
+  BIOMETRIC   // not wired to a real device yet (WBS 3.6) — reserved for that adapter's output
+}
+
+model AttendanceRecord {
+  id             String   @id @default(cuid())
+  organizationId String
+  employeeId     String
+  date           DateTime            // date-only in practice; store at midnight UTC and treat as a calendar day
+  checkIn        DateTime?
+  checkOut       DateTime?
+  status         AttendanceStatus @default(PRESENT)
+  source         AttendanceSource @default(MANUAL)
+  notes          String?
+  createdAt      DateTime @default(now())
+
+  employee       Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, date])   // one record per employee per day
+  @@index([organizationId, date])
+}
+
+// WBS 3.8 — leave type catalog, per-org
+model LeaveType {
+  id                 String   @id @default(cuid())
+  organizationId     String
+  name               String            // "Annual", "Sick", "Unpaid", "Casual"
+  isPaid             Boolean  @default(true)
+  defaultAnnualDays  Int      @default(0)
+
+  balances           LeaveBalance[]
+  requests           LeaveRequest[]
+
+  @@index([organizationId])
+}
+
+// WBS 3.9 — simplified: allocated vs. used per employee per year.
+// No carry-forward/proration logic yet — see README for what that needs.
+model LeaveBalance {
+  id             String   @id @default(cuid())
+  employeeId     String
+  leaveTypeId    String
+  year           Int
+  allocatedDays  Float
+  usedDays       Float    @default(0)
+
+  employee       Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType      LeaveType @relation(fields: [leaveTypeId], references: [id])
+
+  @@unique([employeeId, leaveTypeId, year])
+}
+
+enum LeaveRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+// WBS 3.10 — request + single-level approval (multi-level approval chains
+// are a later enhancement, not built here)
+model LeaveRequest {
+  id             String   @id @default(cuid())
+  organizationId String
+  employeeId     String
+  leaveTypeId    String
+  startDate      DateTime
+  endDate        DateTime
+  days           Float             // computed at request time, not recalculated later
+  reason         String?
+  status         LeaveRequestStatus @default(PENDING)
+  approverId     String?           // Employee.id of whoever approved/rejected
+  decidedAt      DateTime?
+  createdAt      DateTime @default(now())
+
+  employee       Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType      LeaveType @relation(fields: [leaveTypeId], references: [id])
+
+  @@index([organizationId, status])
+  @@index([employeeId])
+}
