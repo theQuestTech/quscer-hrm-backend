@@ -148,3 +148,51 @@ export class AuthService {
         firstName: user.firstName,
         lastName: user.lastName,
       },
+      organization: {
+        id: user.organization.id,
+        name: user.organization.name,
+        currency: user.organization.localeSettings?.defaultCurrency ?? 'PKR',
+        timezone: user.organization.localeSettings?.defaultTimezone ?? 'Asia/Karachi',
+      },
+      roles: user.roleAssignments.map((a) => a.role.name),
+      permissions: [...permissions].sort(),
+      employee: employee && {
+        id: employee.id,
+        employeeNumber: employee.employeeNumber,
+        firstName: employee.firstName,
+        lastName: employee.lastName,
+        designation: employee.designation,
+      },
+    };
+  }
+
+  // Signed-in user changes their own password. Existing sessions stay valid
+  // until their token expires (JWT_EXPIRES_IN) — there's no session
+  // revocation yet (WBS 6.13).
+  async changePassword(userId: string, organizationId: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.user.findFirst({ where: { id: userId, organizationId, isActive: true } });
+    if (!user?.passwordHash || !(await bcrypt.compare(dto.currentPassword, user.passwordHash))) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException('The new password must be different from the current one');
+    }
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: await bcrypt.hash(dto.newPassword, SALT_ROUNDS) },
+    });
+    await this.prisma.auditEvent.create({
+      data: { organizationId, actorUserId: userId, eventType: 'user.password_changed', entityType: 'User', entityId: userId },
+    });
+    return { changed: true };
+  }
+
+  private async issueToken(userId: string, organizationId: string, email: string) {
+    const accessToken = await this.jwtService.signAsync({
+      id: userId,
+      organizationId,
+      email,
+    });
+    return { accessToken };
+  }
+}

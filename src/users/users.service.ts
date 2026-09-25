@@ -148,3 +148,29 @@ export class UsersService {
     });
     if (!role) throw new BadRequestException('No "Employee" role exists in this organization');
     return role.id;
+  }
+
+  private async findUser(organizationId: string, userId: string) {
+    const user = await this.prisma.user.findFirst({ where: { id: userId, organizationId } });
+    if (!user) throw new NotFoundException('User not found');
+    return user;
+  }
+
+  private async assertRolesInOrg(organizationId: string, roleIds: string[]) {
+    const count = await this.prisma.role.count({ where: { organizationId, id: { in: roleIds } } });
+    if (count !== roleIds.length) throw new BadRequestException('One or more roles were not found');
+  }
+
+  private audit(organizationId: string, actorUserId: string, eventType: string, entityId: string, metadata: any) {
+    return this.prisma.auditEvent.create({
+      data: {
+        organizationId,
+        actorUserId,
+        eventType,
+        entityType: eventType.startsWith('employee') ? 'Employee' : 'User',
+        entityId,
+        metadata,
+      },
+    });
+  }
+}
