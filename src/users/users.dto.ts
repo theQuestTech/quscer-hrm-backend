@@ -16,3 +16,7 @@ export class GrantLoginAccessDto {
   @IsOptional() @IsString() userId?: string;
   @IsOptional() @IsArray() @ArrayUnique() @IsString({ each: true }) roleIds?: string[];
 }
+
+export class ResetPasswordDto {
+  @IsString() @MinLength(8) newPassword: string;
+}
