@@ -39,7 +39,7 @@ export class AttendanceController {
   markManual(@Req() req: any, @Body() dto: MarkAttendanceDto) {
     return this.attendanceService.markManual(
       req.user.organizationId,
-      req.user.id,
+      req.user,
       dto.employeeId,
       dto.date,
       dto.status,
@@ -50,7 +50,7 @@ export class AttendanceController {
   @Get('register')
   @RequirePermission('hrm.attendance.approve')
   register(@Req() req: any, @Query() query: QueryRegisterDto) {
-    return this.attendanceService.register(req.user.organizationId, query.date);
+    return this.attendanceService.register(req.user.organizationId, req.user, query.date);
   }
 
   // Employees ask for their own times to be fixed.
@@ -70,13 +70,13 @@ export class AttendanceController {
   @Patch('corrections/:id/approve')
   @RequirePermission('hrm.attendance.approve')
   approveCorrection(@Req() req: any, @Param('id') id: string) {
-    return this.attendanceService.decideCorrection(req.user.organizationId, req.user.id, id, true);
+    return this.attendanceService.decideCorrection(req.user.organizationId, req.user, id, true);
   }
 
   @Patch('corrections/:id/reject')
   @RequirePermission('hrm.attendance.approve')
   rejectCorrection(@Req() req: any, @Param('id') id: string) {
-    return this.attendanceService.decideCorrection(req.user.organizationId, req.user.id, id, false);
+    return this.attendanceService.decideCorrection(req.user.organizationId, req.user, id, false);
   }
 
   // No employeeId = the caller's own history. Someone else's needs

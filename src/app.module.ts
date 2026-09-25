@@ -12,6 +12,7 @@ import { CryptoModule } from './crypto/crypto.module';
 import { SetupModule } from './setup/setup.module';
 import { UsersModule } from './users/users.module';
 import { FeedModule } from './feed/feed.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { FeedModule } from './feed/feed.module';
     SetupModule,
     UsersModule,
     FeedModule,
+    DashboardModule,
   ],
 })
 export class AppModule {}

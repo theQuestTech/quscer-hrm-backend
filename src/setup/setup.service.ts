@@ -10,9 +10,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { EmployeeStatus, LeaveRequestStatus, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { startOfDayUtc, todayInTimeZone } from '../common/dates';
+import { startOfDayUtc } from '../common/dates';
 import {
   CreateBranchDto,
   CreateCostCentreDto,
@@ -276,55 +276,4 @@ export class SetupService {
     return this.prisma.holiday.delete({ where: { id } });
   }
 
-  // --- Dashboard (WBS 5.4 backing data) ----------------------------------
-
-  async dashboardSummary(organizationId: string) {
-    const settings = await this.prisma.organizationLocaleSettings.findUnique({
-      where: { organizationId },
-    });
-    const today = todayInTimeZone(settings?.defaultTimezone);
-    const in30Days = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
-
-    const [activeEmployees, presentToday, onLeaveToday, pendingLeaveRequests, expiringDocuments, latestPayrollRun] =
-      await Promise.all([
-        this.prisma.employee.count({ where: { organizationId, status: EmployeeStatus.ACTIVE } }),
-        this.prisma.attendanceRecord.count({
-          where: { organizationId, date: today, checkIn: { not: null } },
-        }),
-        this.prisma.leaveRequest.count({
-          where: {
-            organizationId,
-            status: LeaveRequestStatus.APPROVED,
-            startDate: { lte: today },
-            endDate: { gte: today },
-          },
-        }),
-        this.prisma.leaveRequest.count({
-          where: { organizationId, status: { in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.FIRST_APPROVED] } },
-        }),
-        this.prisma.employeeDocument.findMany({
-          where: {
-            employee: { organizationId },
-            expiryDate: { gte: today, lte: in30Days },
-          },
-          orderBy: { expiryDate: 'asc' },
-          take: 10,
-          include: { employee: { select: { id: true, firstName: true, lastName: true } } },
-        }),
-        this.prisma.payrollRun.findFirst({
-          where: { organizationId },
-          orderBy: { periodStart: 'desc' },
-        }),
-      ]);
-
-    return {
-      today,
-      activeEmployees,
-      presentToday,
-      onLeaveToday,
-      pendingLeaveRequests,
-      expiringDocuments,
-      latestPayrollRun,
-    };
-  }
 }

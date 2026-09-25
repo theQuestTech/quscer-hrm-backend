@@ -50,13 +50,13 @@ export class LeaveController {
   @Patch('leave-requests/:id/approve')
   @RequirePermission('hrm.leave.approve')
   approve(@Req() req: any, @Param('id') id: string) {
-    return this.leaveService.decide(req.user.organizationId, req.user.id, id, true);
+    return this.leaveService.decide(req.user.organizationId, req.user, id, true);
   }
 
   @Patch('leave-requests/:id/reject')
   @RequirePermission('hrm.leave.approve')
   reject(@Req() req: any, @Param('id') id: string) {
-    return this.leaveService.decide(req.user.organizationId, req.user.id, id, false);
+    return this.leaveService.decide(req.user.organizationId, req.user, id, false);
   }
 
   @Patch('leave-requests/:id/cancel')
@@ -74,6 +74,6 @@ export class LeaveController {
   @Put('leave-balances')
   @RequirePermission('hrm.leave.approve')
   setAllocation(@Req() req: any, @Body() dto: SetLeaveAllocationDto) {
-    return this.leaveService.setAllocation(req.user.organizationId, req.user.id, dto);
+    return this.leaveService.setAllocation(req.user.organizationId, req.user, dto);
   }
 }
