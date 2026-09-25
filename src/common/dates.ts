@@ -58,3 +58,35 @@ export function workingDays(
     (d) => !weekendDays.includes(d.getUTCDay()) && !holidayKeys.has(dayKey(d)),
   );
 }
+
+// Minutes `timeZone` is ahead of UTC at instant `at` (e.g. +300 for Karachi).
+function offsetMinutes(timeZone: string, at: Date): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).formatToParts(at);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)!.value);
+  const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'));
+  return Math.round((asUtc - Math.floor(at.getTime() / 60000) * 60000) / 60000);
+}
+
+// The instant it is "HH:mm" on calendar day `day` (midnight UTC) in
+// `timeZone`. Falls back to UTC for a missing or invalid zone.
+export function zonedTime(day: Date, hhmm: string, timeZone?: string | null): Date {
+  const [h, m] = hhmm.split(':').map(Number);
+  const wall = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), h, m);
+  if (!timeZone) return new Date(wall);
+  try {
+    // Two passes so a time next to a DST change lands on the right offset.
+    let guess = wall - offsetMinutes(timeZone, new Date(wall)) * 60000;
+    guess = wall - offsetMinutes(timeZone, new Date(guess)) * 60000;
+    return new Date(guess);
+  } catch {
+    return new Date(wall);
+  }
+}

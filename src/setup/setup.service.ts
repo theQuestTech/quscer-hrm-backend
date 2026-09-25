@@ -80,7 +80,7 @@ export class SetupService {
           defaultCurrency: locale.defaultCurrency ?? 'PKR',
           defaultTimezone: locale.defaultTimezone ?? 'Asia/Karachi',
           loadedStatutoryPacks: ['PK'],
-          ...(locale.weekendDays && { weekendDays: locale.weekendDays }),
+          ...locale,
         },
         update: locale,
       });
@@ -299,7 +299,9 @@ export class SetupService {
             endDate: { gte: today },
           },
         }),
-        this.prisma.leaveRequest.count({ where: { organizationId, status: LeaveRequestStatus.PENDING } }),
+        this.prisma.leaveRequest.count({
+          where: { organizationId, status: { in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.FIRST_APPROVED] } },
+        }),
         this.prisma.employeeDocument.findMany({
           where: {
             employee: { organizationId },

@@ -5,11 +5,12 @@ import { PayrollController } from './payroll.controller';
 import { PayrollService } from './payroll.service';
 import { StatutoryEngineService } from './statutory-engine.service';
 import { PayslipPdfService } from './payslip-pdf.service';
+import { SettlementService } from './settlement.service';
 
 @Module({
   imports: [AuthModule, RbacModule],
   controllers: [PayrollController],
-  providers: [PayrollService, StatutoryEngineService, PayslipPdfService],
+  providers: [PayrollService, StatutoryEngineService, PayslipPdfService, SettlementService],
   exports: [StatutoryEngineService], // Phase 6 accounting-journal work will likely need this too
 })
 export class PayrollModule {}
