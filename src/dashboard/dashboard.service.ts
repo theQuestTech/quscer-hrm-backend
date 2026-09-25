@@ -24,7 +24,9 @@ const OPEN_LEAVE = [LeaveRequestStatus.PENDING, LeaveRequestStatus.FIRST_APPROVE
 const UPCOMING_DAYS = 30;
 const HR_WIDE = ['hrm.employee.write', 'hrm.settings.write'];
 
-const person = { select: { id: true, firstName: true, lastName: true, designation: true, employeeNumber: true } } as const;
+const person = {
+  select: { id: true, firstName: true, lastName: true, designation: true, employeeNumber: true, photoUpdatedAt: true },
+} as const;
 
 @Injectable()
 export class DashboardService {
@@ -244,7 +246,7 @@ export class DashboardService {
       where: { organizationId, status: { in: [EmployeeStatus.ACTIVE, EmployeeStatus.ON_LEAVE] }, ...inScope },
       orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
       select: {
-        id: true, firstName: true, lastName: true, designation: true, employeeNumber: true, branchId: true,
+        id: true, firstName: true, lastName: true, designation: true, employeeNumber: true, branchId: true, photoUpdatedAt: true,
         attendanceRecords: { where: { date: today }, select: { status: true, checkIn: true } },
       },
     });

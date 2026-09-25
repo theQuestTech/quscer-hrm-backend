@@ -3,10 +3,12 @@ import { AuthModule } from '../auth/auth.module';
 import { RbacModule } from '../rbac/rbac.module';
 import { EmployeesController } from './employees.controller';
 import { EmployeesService } from './employees.service';
+import { PhotoController } from './photo.controller';
+import { MeController } from './me.controller';
 
 @Module({
   imports: [AuthModule, RbacModule],
-  controllers: [EmployeesController],
+  controllers: [EmployeesController, PhotoController, MeController],
   providers: [EmployeesService],
 })
 export class EmployeesModule {}

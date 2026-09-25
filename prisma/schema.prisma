@@ -446,9 +446,21 @@ model Employee {
   status         EmployeeStatus @default(ACTIVE)
   employmentType EmploymentType @default(FULL_TIME)
 
-  dateOfJoining    DateTime
+  dateOfJoining  DateTime
   // Only day and month are ever shown (birthday posts), never the year.
-  dateOfBirth      DateTime?
+  dateOfBirth    DateTime?
+  // Set when a profile photo is uploaded; also used to refresh cached photos.
+  photoUpdatedAt DateTime?
+
+  // Personal details — the employee can fill these in on My Profile.
+  fatherName       String?
+  cnic             String? // national ID, e.g. 35202-1234567-1
+  gender           String? // "MALE" | "FEMALE" | "OTHER"
+  maritalStatus    String? // "SINGLE" | "MARRIED" | "DIVORCED" | "WIDOWED"
+  bloodGroup       String?
+  personalEmail    String?
+  address          String?
+  city             String?
   probationEndDate DateTime? // WBS 2.4 — basic field, not a full workflow yet
   confirmedAt      DateTime?
   contractEndDate  DateTime? // for CONTRACT/INTERN types
@@ -481,6 +493,7 @@ model Employee {
   attendanceCorrections AttendanceCorrection[]
   finalSettlement       FinalSettlement?
   birthdayPosts         FeedPost[]
+  photo                 EmployeePhoto?
 
   @@unique([organizationId, employeeNumber])
   @@unique([organizationId, userId])
@@ -530,6 +543,16 @@ model EmployeeDocumentFile {
   data       Bytes
 
   document EmployeeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+// Profile photo (JPG/PNG/WebP, up to 2 MB), kept in Postgres like
+// uploaded documents.
+model EmployeePhoto {
+  employeeId String @id
+  mimeType   String
+  data       Bytes
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 }
 
 // WBS 2.3 — bank details. accountNumber is encrypted at rest (WBS 6.12,
