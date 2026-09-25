@@ -7,7 +7,11 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { StatutoryEngineService } from './statutory-engine.service';
 import { AttendanceStatus, EmployeeStatus, LeaveRequestStatus, PayrollRunStatus } from '@prisma/client';
-import { dayKey, eachDay, startOfDayUtc, workingDays } from '../common/dates';
+import { eachDay, startOfDayUtc } from '../common/dates';
+import { computeUnpaidDays } from './unpaid-days';
+import { BankFileRow, toBankCsv } from './bank-file';
+import { FieldEncryptionService } from '../crypto/field-encryption.service';
+import { createHash } from 'crypto';
 import { loadWorkCalendar } from '../common/work-calendar';
 import { requireEmployeeForUser } from '../common/current-employee';
 
@@ -18,6 +22,7 @@ export class PayrollService {
   constructor(
     private prisma: PrismaService,
     private statutoryEngine: StatutoryEngineService,
+    private fieldEncryption: FieldEncryptionService,
   ) {}
 
   // ---------------------------------------------------------------------
@@ -194,33 +199,18 @@ export class PayrollService {
 
       let totalDeductions = 0;
 
-      // Unpaid days (WBS 4.6): calendar days before the joining date, working
-      // days of approved unpaid leave, and ABSENT (1) / HALF_DAY (0.5)
-      // attendance — each date counted once. Daily rate = gross / calendar
-      // days in the period.
-      const unpaidDayWeights = new Map<string, number>();
-      const joined = startOfDayUtc(employee.dateOfJoining);
-      if (joined > periodStart) {
-        const lastDayBeforeJoining = new Date(joined.getTime() - 24 * 60 * 60 * 1000);
-        for (const d of eachDay(periodStart, lastDayBeforeJoining < periodEnd ? lastDayBeforeJoining : periodEnd)) {
-          unpaidDayWeights.set(dayKey(d), 1);
-        }
-      }
+      // Unpaid days (WBS 4.6) — rules live in unpaid-days.ts. Daily rate =
+      // gross / calendar days in the period.
       const { weekendDays, holidayKeys } = await calendarFor(employee.branchId);
-      for (const leave of unpaidLeave.filter((l) => l.employeeId === employee.id)) {
-        const from = leave.startDate > periodStart ? leave.startDate : periodStart;
-        const to = leave.endDate < periodEnd ? leave.endDate : periodEnd;
-        for (const d of workingDays(from, to, weekendDays, holidayKeys)) {
-          unpaidDayWeights.set(dayKey(d), 1);
-        }
-      }
-      for (const record of absences.filter((a) => a.employeeId === employee.id)) {
-        const key = dayKey(record.date);
-        if (!unpaidDayWeights.has(key)) {
-          unpaidDayWeights.set(key, record.status === AttendanceStatus.HALF_DAY ? 0.5 : 1);
-        }
-      }
-      const unpaidDays = [...unpaidDayWeights.values()].reduce((a, b) => a + b, 0);
+      const unpaidDays = computeUnpaidDays({
+        periodStart,
+        periodEnd,
+        dateOfJoining: employee.dateOfJoining,
+        unpaidLeave: unpaidLeave.filter((l) => l.employeeId === employee.id),
+        absences: absences.filter((a) => a.employeeId === employee.id),
+        weekendDays,
+        holidayKeys,
+      });
       let unpaidAmount = 0;
       if (unpaidDays > 0) {
         unpaidAmount = round2(Math.min(grossSalary, (grossSalary / periodCalendarDays) * unpaidDays));
@@ -437,9 +427,64 @@ export class PayrollService {
     return { deleted: true };
   }
 
-  private audit(organizationId: string, actorUserId: string, eventType: string, runId: string) {
+  // WBS 4.11 — bank payment file for an APPROVED or LOCKED run. This is the
+  // one place account numbers are decrypted; every download is audited with
+  // a hash of the exact file handed out. Employees with no bank details (or
+  // nothing to pay) are left out and reported back so HR can pay them
+  // another way.
+  async bankFile(organizationId: string, actorUserId: string, runId: string) {
+    const run = await this.getRunOrThrow(organizationId, runId);
+    if (run.status !== PayrollRunStatus.APPROVED && run.status !== PayrollRunStatus.LOCKED) {
+      throw new BadRequestException('The bank file is only available once the payroll run has been approved');
+    }
+    const items = await this.prisma.payrollLineItem.findMany({
+      where: { payrollRunId: runId },
+      include: { employee: { include: { bankDetail: true } } },
+      orderBy: { employee: { employeeNumber: 'asc' } },
+    });
+
+    const reference = `Salary ${run.periodStart.toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' })}`;
+    const rows: BankFileRow[] = [];
+    const missingBankDetails: string[] = [];
+    for (const item of items) {
+      const net = Number(item.netSalary);
+      if (net <= 0) continue;
+      const bank = item.employee.bankDetail;
+      if (!bank) {
+        missingBankDetails.push(item.employee.employeeNumber);
+        continue;
+      }
+      rows.push({
+        employeeNumber: item.employee.employeeNumber,
+        employeeName: `${item.employee.firstName} ${item.employee.lastName}`,
+        bankName: bank.bankName,
+        branchCode: bank.branchCode,
+        accountTitle: bank.accountTitle,
+        accountNumber: this.fieldEncryption.decrypt(bank.accountNumber),
+        amount: net,
+        currency: item.currency,
+        reference,
+      });
+    }
+
+    const csv = toBankCsv(rows);
+    await this.audit(organizationId, actorUserId, 'payroll.bank_file_exported', runId, {
+      sha256: createHash('sha256').update(csv).digest('hex'),
+      payments: rows.length,
+      total: round2(rows.reduce((sum, r) => sum + r.amount, 0)),
+      missingBankDetails,
+    });
+
+    return {
+      csv,
+      filename: `bank-file-${run.periodStart.toISOString().slice(0, 7)}.csv`,
+      missingBankDetails,
+    };
+  }
+
+  private audit(organizationId: string, actorUserId: string, eventType: string, runId: string, metadata: any = {}) {
     return this.prisma.auditEvent.create({
-      data: { organizationId, actorUserId, eventType, entityType: 'PayrollRun', entityId: runId },
+      data: { organizationId, actorUserId, eventType, entityType: 'PayrollRun', entityId: runId, metadata },
     });
   }
 

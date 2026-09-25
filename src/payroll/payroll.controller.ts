@@ -72,6 +72,24 @@ export class PayrollController {
     return this.payrollService.deleteDraft(req.user.organizationId, req.user.id, id);
   }
 
+  // WBS 4.11 — CSV for the bank's bulk-transfer upload. Contains full account
+  // numbers, so it needs the approver permission, not just payroll.read.
+  // Employee numbers left out (no bank details) come back in a header.
+  @Get('payroll-runs/:id/bank-file')
+  @RequirePermission('hrm.payroll.approve')
+  async bankFile(@Req() req: any, @Param('id') id: string, @Res() res: Response) {
+    const { csv, filename, missingBankDetails } = await this.payrollService.bankFile(
+      req.user.organizationId, req.user.id, id,
+    );
+    res.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'X-Missing-Bank-Details': missingBankDetails.join(','),
+      'Cache-Control': 'no-store',
+    });
+    res.send(csv);
+  }
+
   // Self-service list of the caller's own approved payslips — like
   // my-payslip below, no payroll permission needed for your own pay.
   @Get('my-payslips')
