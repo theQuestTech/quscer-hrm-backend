@@ -117,7 +117,12 @@ export class SettlementService {
         data: { status: LeaveRequestStatus.CANCELLED },
       });
       if (employee.userId) {
-        await tx.user.update({ where: { id: employee.userId }, data: { isActive: false } });
+        // Only their access to this company — the same login may still be
+        // used for other companies.
+        await tx.membership.updateMany({
+          where: { userId: employee.userId, organizationId },
+          data: { isActive: false },
+        });
       }
       return updated;
     });

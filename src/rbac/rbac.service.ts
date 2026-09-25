@@ -31,10 +31,16 @@ export class RbacService {
   constructor(private prisma: PrismaService) {}
 
   // Effective permission = UNION of every role assigned to the user within
-  // their organization (default deny). Inactive users get nothing.
+  // this organization (default deny). A login that is switched off, or no
+  // longer has access to this company, gets nothing — checked on every
+  // request, so removing someone takes effect immediately.
   async getEffectivePermissions(userId: string, organizationId: string): Promise<Set<string>> {
     const assignments = await this.prisma.userRoleAssignment.findMany({
-      where: { userId, organizationId, user: { isActive: true } },
+      where: {
+        userId,
+        organizationId,
+        user: { isActive: true, memberships: { some: { organizationId, isActive: true } } },
+      },
       include: {
         role: { include: { permissions: { include: { permission: true } } } },
       },

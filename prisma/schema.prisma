@@ -26,6 +26,7 @@ model Organization {
   updatedAt   DateTime @updatedAt
 
   users          User[]
+  memberships    Membership[]
   branches       Branch[]
   roles          Role[]
   auditEvents    AuditEvent[]
@@ -36,6 +37,10 @@ model Organization {
   @@index([quscerOrgId])
 }
 
+// One person = one login (email is unique across the whole system, checked
+// in code). organizationId is the company they first signed up in; which
+// companies they can open is Membership — e.g. an outsourced HR person
+// working for several client companies.
 model User {
   id             String   @id @default(cuid())
   organizationId String
@@ -50,8 +55,29 @@ model User {
 
   organization    Organization         @relation(fields: [organizationId], references: [id])
   roleAssignments UserRoleAssignment[]
+  memberships     Membership[]
+  feedPosts       FeedPost[]
+  feedComments    FeedComment[]
+  feedLikes       FeedLike[]
 
   @@unique([organizationId, email])
+  @@index([organizationId])
+  @@index([email])
+}
+
+// Access to one company. Deactivating someone in a company switches off
+// this row only — their login keeps working for their other companies.
+model Membership {
+  id             String   @id @default(cuid())
+  userId         String
+  organizationId String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
   @@index([organizationId])
 }
 
@@ -190,6 +216,8 @@ model OrganizationLocaleSettings {
   leaveApprovalSteps   Int      @default(1)
   // WBS 3.4 — minutes after shift start before a check-in counts as late.
   lateGraceMinutes     Int      @default(15)
+  // Feed — post "Happy birthday" automatically on employees' birthdays.
+  birthdayPostsEnabled Boolean  @default(true)
   updatedAt            DateTime @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id])
@@ -402,7 +430,7 @@ enum EmploymentType {
 model Employee {
   id             String  @id @default(cuid())
   organizationId String
-  userId         String? @unique // set only if this employee also has app login access
+  userId         String? // set only if this employee also has app login access — one employee per login per company
   branchId       String?
   departmentId   String?
   managerId      String? // self-relation — WBS 2.6
@@ -419,6 +447,8 @@ model Employee {
   employmentType EmploymentType @default(FULL_TIME)
 
   dateOfJoining    DateTime
+  // Only day and month are ever shown (birthday posts), never the year.
+  dateOfBirth      DateTime?
   probationEndDate DateTime? // WBS 2.4 — basic field, not a full workflow yet
   confirmedAt      DateTime?
   contractEndDate  DateTime? // for CONTRACT/INTERN types
@@ -450,8 +480,10 @@ model Employee {
   loans                 EmployeeLoan[]
   attendanceCorrections AttendanceCorrection[]
   finalSettlement       FinalSettlement?
+  birthdayPosts         FeedPost[]
 
   @@unique([organizationId, employeeNumber])
+  @@unique([organizationId, userId])
   @@index([organizationId, status])
   @@index([managerId])
 }
@@ -721,4 +753,73 @@ model FinalSettlement {
   employee Employee @relation(fields: [employeeId], references: [id])
 
   @@index([organizationId, status])
+}
+
+// ----------------------------------------------------------------------------
+// Company feed — posts with pictures, HR announcements (pinned on top) and
+// automatic birthday posts; everyone in the company can like and comment.
+// ----------------------------------------------------------------------------
+enum FeedPostKind {
+  POST
+  ANNOUNCEMENT
+  BIRTHDAY
+}
+
+model FeedPost {
+  id                String       @id @default(cuid())
+  organizationId    String
+  kind              FeedPostKind @default(POST)
+  authorUserId      String? // null for automatic posts
+  subjectEmployeeId String? // whose birthday it is
+  body              String
+  isPinned          Boolean      @default(false)
+  // Makes automatic posts idempotent, e.g. "birthday:<employeeId>:2026".
+  autoKey           String?      @unique
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  author          User?         @relation(fields: [authorUserId], references: [id])
+  subjectEmployee Employee?     @relation(fields: [subjectEmployeeId], references: [id], onDelete: Cascade)
+  images          FeedImage[]
+  comments        FeedComment[]
+  likes           FeedLike[]
+
+  @@index([organizationId, createdAt])
+}
+
+model FeedImage {
+  id        String @id @default(cuid())
+  postId    String
+  position  Int
+  mimeType  String
+  sizeBytes Int
+  data      Bytes
+
+  post FeedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+}
+
+model FeedComment {
+  id           String   @id @default(cuid())
+  postId       String
+  authorUserId String
+  body         String
+  createdAt    DateTime @default(now())
+
+  post   FeedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author User     @relation(fields: [authorUserId], references: [id])
+
+  @@index([postId, createdAt])
+}
+
+model FeedLike {
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  post FeedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User     @relation(fields: [userId], references: [id])
+
+  @@id([postId, userId])
 }

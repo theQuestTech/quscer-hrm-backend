@@ -29,6 +29,8 @@ export class UpdateOrganizationSettingsDto {
   @IsOptional() @IsInt() @Min(1) @Max(2) leaveApprovalSteps?: number;
   // Minutes after shift start before a check-in counts as late.
   @IsOptional() @IsInt() @Min(0) @Max(240) lateGraceMinutes?: number;
+  // Post "Happy birthday" on the feed automatically.
+  @IsOptional() @IsBoolean() birthdayPostsEnabled?: boolean;
 }
 
 export class CreateBranchDto {
