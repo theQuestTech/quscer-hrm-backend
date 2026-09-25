@@ -77,6 +77,11 @@ export class AuthService {
     if (!(await findActiveMembership(this.prisma, userId, currentOrganizationId))) {
       throw new UnauthorizedException('User not found or inactive');
     }
+    // Only an HR admin (company settings) can set up another company.
+    const permissions = await this.rbacService.getEffectivePermissions(userId, currentOrganizationId);
+    if (!permissions.has('hrm.settings.write')) {
+      throw new ForbiddenException('Only HR admins can add a company');
+    }
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     const organization = await this.prisma.organization.create({ data: { name: organizationName } });
     await this.setUpOrganization(organization.id, userId);
@@ -168,6 +173,7 @@ export class AuthService {
         firstName: employee.firstName,
         lastName: employee.lastName,
         designation: employee.designation,
+        photoUpdatedAt: employee.photoUpdatedAt,
       },
     };
   }

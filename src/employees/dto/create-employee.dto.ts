@@ -7,8 +7,9 @@ import {
   MinLength,
 } from 'class-validator';
 import { EmployeeStatus, EmploymentType } from '@prisma/client';
+import { PersonalDetailsDto } from './personal-details.dto';
 
-export class CreateEmployeeDto {
+export class CreateEmployeeDto extends PersonalDetailsDto {
   @IsString()
   @MinLength(1)
   employeeNumber: string;

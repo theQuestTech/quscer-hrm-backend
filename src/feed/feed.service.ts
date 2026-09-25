@@ -34,6 +34,10 @@ export function sniffImageType(buffer: Buffer): string | null {
 type Caller = { id: string; organizationId: string };
 
 const personSelect = { select: { id: true, firstName: true, lastName: true } } as const;
+const employeeSelect = { select: { id: true, firstName: true, lastName: true, photoUpdatedAt: true } } as const;
+
+// A person's profile photo, if they have one in this company.
+type Photo = { employeeId: string; photoUpdatedAt: Date } | null;
 
 @Injectable()
 export class FeedService {
@@ -57,7 +61,7 @@ export class FeedService {
 
     const include = {
       author: personSelect,
-      subjectEmployee: personSelect,
+      subjectEmployee: employeeSelect,
       images: { select: { id: true }, orderBy: { position: 'asc' as const } },
       likes: { where: { userId: caller.id }, select: { userId: true } },
       _count: { select: { likes: true, comments: true } },
@@ -81,6 +85,7 @@ export class FeedService {
     ]);
     const hasMore = page.length > limit;
     const items = hasMore ? page.slice(0, limit) : page;
+    const photos = await this.photos(caller.organizationId, [...pinned, ...items].map((p) => p.authorUserId));
 
     const shape = (p: (typeof page)[number]) => ({
       id: p.id,
@@ -88,8 +93,15 @@ export class FeedService {
       body: p.body,
       isPinned: p.isPinned,
       createdAt: p.createdAt,
-      author: p.author,
-      subjectEmployee: p.subjectEmployee,
+      author: p.author && { ...p.author, photo: photos.get(p.author.id) ?? null },
+      subjectEmployee: p.subjectEmployee && {
+        id: p.subjectEmployee.id,
+        firstName: p.subjectEmployee.firstName,
+        lastName: p.subjectEmployee.lastName,
+        photo: p.subjectEmployee.photoUpdatedAt
+          ? { employeeId: p.subjectEmployee.id, photoUpdatedAt: p.subjectEmployee.photoUpdatedAt }
+          : null,
+      },
       imageIds: p.images.map((i) => i.id),
       likeCount: p._count.likes,
       commentCount: p._count.comments,
@@ -191,7 +203,8 @@ export class FeedService {
       orderBy: { createdAt: 'asc' },
       include: { user: personSelect },
     });
-    return likes.map((l) => l.user);
+    const photos = await this.photos(caller.organizationId, likes.map((l) => l.userId));
+    return likes.map((l) => ({ ...l.user, photo: photos.get(l.userId) ?? null }));
   }
 
   async comments(caller: Caller, postId: string) {
@@ -202,11 +215,12 @@ export class FeedService {
       orderBy: { createdAt: 'asc' },
       include: { author: personSelect },
     });
+    const photos = await this.photos(caller.organizationId, comments.map((c) => c.authorUserId));
     return comments.map((c) => ({
       id: c.id,
       body: c.body,
       createdAt: c.createdAt,
-      author: c.author,
+      author: { ...c.author, photo: photos.get(c.authorUserId) ?? null },
       canDelete: isModerator || c.authorUserId === caller.id,
     }));
   }
@@ -220,7 +234,14 @@ export class FeedService {
       data: { postId, authorUserId: caller.id, body: text },
       include: { author: personSelect },
     });
-    return { id: comment.id, body: comment.body, createdAt: comment.createdAt, author: comment.author, canDelete: true };
+    const photos = await this.photos(caller.organizationId, [caller.id]);
+    return {
+      id: comment.id,
+      body: comment.body,
+      createdAt: comment.createdAt,
+      author: { ...comment.author, photo: photos.get(caller.id) ?? null },
+      canDelete: true,
+    };
   }
 
   async removeComment(caller: Caller, commentId: string) {
@@ -240,6 +261,19 @@ export class FeedService {
   }
 
   // --- internals ----------------------------------------------------------
+
+  // Logins → the photo on their employee profile in this company.
+  private async photos(organizationId: string, userIds: (string | null)[]) {
+    const ids = [...new Set(userIds.filter((x): x is string => !!x))];
+    const map = new Map<string, Photo>();
+    if (ids.length === 0) return map;
+    const employees = await this.prisma.employee.findMany({
+      where: { organizationId, userId: { in: ids }, photoUpdatedAt: { not: null } },
+      select: { id: true, userId: true, photoUpdatedAt: true },
+    });
+    for (const e of employees) map.set(e.userId!, { employeeId: e.id, photoUpdatedAt: e.photoUpdatedAt! });
+    return map;
+  }
 
   private async findPost(caller: Caller, postId: string) {
     const post = await this.prisma.feedPost.findFirst({ where: { id: postId, organizationId: caller.organizationId } });

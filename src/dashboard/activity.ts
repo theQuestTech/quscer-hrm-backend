@@ -5,6 +5,7 @@
 const PHRASES: Record<string, string> = {
   'employee.created': 'added a new employee',
   'employee.updated': 'updated an employee profile',
+  'employee.self_updated': 'updated their own profile',
   'employee.login_granted': 'gave an employee login access',
   'employee.document_uploaded': 'uploaded a document',
   'attendance.marked': 'marked attendance',
