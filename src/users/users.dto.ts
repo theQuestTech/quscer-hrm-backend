@@ -1,4 +1,4 @@
-import { ArrayUnique, IsArray, IsBoolean, IsOptional, IsString, MinLength } from 'class-validator';
+import { ArrayMinSize, ArrayUnique, IsArray, IsBoolean, IsEmail, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class SetUserRolesDto {
   @IsArray() @ArrayUnique() @IsString({ each: true }) roleIds: string[];
@@ -19,4 +19,14 @@ export class GrantLoginAccessDto {
 
 export class ResetPasswordDto {
   @IsString() @MinLength(8) newPassword: string;
+}
+
+// Add a person to this company who isn't an employee (outsourced HR,
+// accountant). password is only used when the email has no login yet.
+export class AddPersonDto {
+  @IsEmail() email: string;
+  @IsString() @MinLength(1) firstName: string;
+  @IsString() @MinLength(1) lastName: string;
+  @IsOptional() @IsString() @MinLength(8) password?: string;
+  @IsArray() @ArrayMinSize(1) @ArrayUnique() @IsString({ each: true }) roleIds: string[];
 }

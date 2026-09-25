@@ -106,6 +106,7 @@ export class EmployeesService {
           designation: dto.designation,
           employmentType: dto.employmentType,
           dateOfJoining: new Date(dto.dateOfJoining),
+          dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined,
           probationEndDate: dto.probationEndDate ? new Date(dto.probationEndDate) : undefined,
           contractEndDate: dto.contractEndDate ? new Date(dto.contractEndDate) : undefined,
           branchId: dto.branchId,
@@ -205,7 +206,7 @@ export class EmployeesService {
     await this.findOne(organizationId, id); // 404s if not found or wrong org
     await this.assertRefsInOrg(organizationId, dto, id);
 
-    const { status, dateOfJoining, probationEndDate, contractEndDate, confirmedAt, ...rest } = dto;
+    const { status, dateOfJoining, dateOfBirth, probationEndDate, contractEndDate, confirmedAt, ...rest } = dto;
     const toDate = (v?: string | null) => (v === undefined ? undefined : v === null ? null : new Date(v));
     const employee = await this.prisma.employee.update({
       where: { id },
@@ -213,6 +214,7 @@ export class EmployeesService {
         ...rest,
         ...(status && { status }),
         ...(dateOfJoining && { dateOfJoining: new Date(dateOfJoining) }),
+        dateOfBirth: toDate(dateOfBirth),
         probationEndDate: toDate(probationEndDate),
         contractEndDate: toDate(contractEndDate),
         confirmedAt: toDate(confirmedAt),

@@ -39,6 +39,11 @@ export class CreateEmployeeDto {
   @IsDateString()
   dateOfJoining: string;
 
+  // Used for automatic birthday posts on the feed (day and month only).
+  @IsOptional()
+  @IsDateString()
+  dateOfBirth?: string;
+
   @IsOptional()
   @IsDateString()
   probationEndDate?: string;

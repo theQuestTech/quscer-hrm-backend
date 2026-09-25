@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, Put, Req, UseGuards } from '
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionGuard, RequirePermission } from '../rbac/permission.guard';
 import { UsersService } from './users.service';
-import { GrantLoginAccessDto, ResetPasswordDto, SetUserRolesDto, UpdateUserDto } from './users.dto';
+import { AddPersonDto, GrantLoginAccessDto, ResetPasswordDto, SetUserRolesDto, UpdateUserDto } from './users.dto';
 
 // Who can log in and what they can do is an org-settings concern, so every
 // route here needs hrm.settings.write.
@@ -21,6 +21,13 @@ export class UsersController {
   @RequirePermission('hrm.settings.write')
   listUsers(@Req() req: any) {
     return this.usersService.listUsers(req.user.organizationId);
+  }
+
+  // Outsourced HR, accountants and others without an employee record.
+  @Post('users')
+  @RequirePermission('hrm.settings.write')
+  addPerson(@Req() req: any, @Body() dto: AddPersonDto) {
+    return this.usersService.addPerson(req.user.organizationId, req.user.id, dto);
   }
 
   @Put('users/:id/roles')

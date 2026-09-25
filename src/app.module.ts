@@ -11,6 +11,7 @@ import { PayrollModule } from './payroll/payroll.module';
 import { CryptoModule } from './crypto/crypto.module';
 import { SetupModule } from './setup/setup.module';
 import { UsersModule } from './users/users.module';
+import { FeedModule } from './feed/feed.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { UsersModule } from './users/users.module';
     PayrollModule,
     SetupModule,
     UsersModule,
+    FeedModule,
   ],
 })
 export class AppModule {}
