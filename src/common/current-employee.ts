@@ -13,7 +13,7 @@ export function findEmployeeForUser(
 ) {
   return prisma.employee.findFirst({
     where: { organizationId, userId },
-    include: { branch: true },
+    include: { branch: true, shift: true },
   });
 }
 

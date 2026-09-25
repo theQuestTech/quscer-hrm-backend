@@ -9,16 +9,21 @@ import {
   Put,
   Query,
   Req,
+  Res,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionGuard, RequirePermission } from '../rbac/permission.guard';
-import { EmployeesService } from './employees.service';
+import { EmployeesService, MAX_DOCUMENT_BYTES } from './employees.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { QueryEmployeesDto } from './dto/query-employees.dto';
 import { CreateEmergencyContactDto } from './dto/create-emergency-contact.dto';
-import { CreateEmployeeDocumentDto } from './dto/create-employee-document.dto';
+import { CreateEmployeeDocumentDto, UploadEmployeeDocumentDto } from './dto/create-employee-document.dto';
 import { UpsertBankDetailDto } from './dto/upsert-bank-detail.dto';
 
 @Controller('employees')
@@ -101,6 +106,38 @@ export class EmployeesController {
     @Body() dto: CreateEmployeeDocumentDto,
   ) {
     return this.employeesService.addDocument(req.user.organizationId, id, dto);
+  }
+
+  // multipart/form-data: file + category (+ expiryDate). Multer stops
+  // reading just past the limit so a huge upload can't fill memory.
+  @Post(':id/documents/upload')
+  @RequirePermission('hrm.employee.write')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_DOCUMENT_BYTES + 1, files: 1 } }))
+  uploadDocument(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: UploadEmployeeDocumentDto,
+    @UploadedFile() file: Express.Multer.File | undefined,
+  ) {
+    return this.employeesService.uploadDocument(req.user.organizationId, req.user.id, id, dto, file);
+  }
+
+  @Get(':id/documents/:documentId/file')
+  @RequirePermission('hrm.employee.read')
+  async downloadDocument(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @Res() res: Response,
+  ) {
+    const file = await this.employeesService.downloadDocument(req.user.organizationId, id, documentId);
+    res.set({
+      'Content-Type': file.mimeType,
+      'Content-Disposition': `attachment; filename="${file.fileName}"`,
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'private, no-store',
+    });
+    res.send(Buffer.from(file.data));
   }
 
   @Delete(':id/documents/:documentId')

@@ -25,6 +25,10 @@ export class UpdateOrganizationSettingsDto {
   @Min(0, { each: true })
   @Max(6, { each: true })
   weekendDays?: number[];
+  // 1 = one approver decides; 2 = a second, different approver must confirm.
+  @IsOptional() @IsInt() @Min(1) @Max(2) leaveApprovalSteps?: number;
+  // Minutes after shift start before a check-in counts as late.
+  @IsOptional() @IsInt() @Min(0) @Max(240) lateGraceMinutes?: number;
 }
 
 export class CreateBranchDto {

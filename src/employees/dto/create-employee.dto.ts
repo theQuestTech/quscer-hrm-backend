@@ -61,6 +61,10 @@ export class CreateEmployeeDto {
 
   @IsOptional()
   @IsString()
+  shiftId?: string;
+
+  @IsOptional()
+  @IsString()
   countryCode?: string;
 
   @IsOptional()

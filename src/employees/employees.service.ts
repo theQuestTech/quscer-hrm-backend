@@ -10,6 +10,27 @@ import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { QueryEmployeesDto } from './dto/query-employees.dto';
 
+export const MAX_DOCUMENT_BYTES = 5 * 1024 * 1024;
+
+export function sniffDocumentType(buffer: Buffer): string | null {
+  if (buffer.subarray(0, 5).toString('latin1') === '%PDF-') return 'application/pdf';
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+  if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+  return null;
+}
+
+// Keeps letters, digits, dot, dash, underscore and space, and makes the
+// extension match the real type — the name ends up in a download header.
+export function safeFileName(original: string, mimeType: string): string {
+  const ext = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png' }[mimeType] ?? 'bin';
+  const base = (original || 'document')
+    .replace(/\.[^.]*$/, '')
+    .replace(/[^A-Za-z0-9._\- ]+/g, '_')
+    .trim()
+    .slice(0, 80) || 'document';
+  return `${base}.${ext}`;
+}
+
 @Injectable()
 export class EmployeesService {
   constructor(
@@ -21,7 +42,7 @@ export class EmployeesService {
   // another organization must never be linkable just because it exists.
   private async assertRefsInOrg(
     organizationId: string,
-    refs: { branchId?: string; departmentId?: string; managerId?: string },
+    refs: { branchId?: string; departmentId?: string; managerId?: string; shiftId?: string | null },
     selfId?: string,
   ) {
     if (refs.branchId) {
@@ -31,6 +52,10 @@ export class EmployeesService {
     if (refs.departmentId) {
       const found = await this.prisma.department.count({ where: { id: refs.departmentId, organizationId } });
       if (!found) throw new BadRequestException('Department not found');
+    }
+    if (refs.shiftId) {
+      const found = await this.prisma.shift.count({ where: { id: refs.shiftId, organizationId } });
+      if (!found) throw new BadRequestException('Shift not found');
     }
     if (refs.managerId) {
       if (refs.managerId === selfId) throw new BadRequestException('An employee cannot be their own manager');
@@ -86,6 +111,7 @@ export class EmployeesService {
           branchId: dto.branchId,
           departmentId: dto.departmentId,
           managerId: dto.managerId,
+          shiftId: dto.shiftId,
           countryCode,
           regionCode,
         },
@@ -155,6 +181,7 @@ export class EmployeesService {
       include: {
         branch: true,
         department: true,
+        shift: true,
         manager: { select: { id: true, firstName: true, lastName: true } },
         directReports: { select: { id: true, firstName: true, lastName: true, designation: true } },
         emergencyContacts: true,
@@ -249,12 +276,64 @@ export class EmployeesService {
     });
   }
 
+  // WBS 2.5 — an uploaded file is kept in Postgres (EmployeeDocumentFile),
+  // so it is backed up with everything else and needs no extra storage
+  // service. Only PDF/JPG/PNG up to 5 MB, and the type is checked from the
+  // file's first bytes, not from the name the browser sent.
+  async uploadDocument(
+    organizationId: string,
+    actorUserId: string,
+    employeeId: string,
+    dto: { category: string; expiryDate?: string },
+    file: Express.Multer.File | undefined,
+  ) {
+    await this.findOne(organizationId, employeeId);
+    if (!file) throw new BadRequestException('Choose a file to upload');
+    if (file.size > MAX_DOCUMENT_BYTES) throw new BadRequestException('Files can be at most 5 MB');
+    const mimeType = sniffDocumentType(file.buffer);
+    if (!mimeType) throw new BadRequestException('Only PDF, JPG and PNG files can be uploaded');
+
+    const document = await this.prisma.employeeDocument.create({
+      data: {
+        employeeId,
+        category: dto.category,
+        expiryDate: dto.expiryDate ? new Date(dto.expiryDate) : undefined,
+        fileName: safeFileName(file.originalname, mimeType),
+        mimeType,
+        sizeBytes: file.size,
+        file: { create: { data: file.buffer } },
+      },
+    });
+    await this.prisma.auditEvent.create({
+      data: {
+        organizationId,
+        actorUserId,
+        eventType: 'employee.document_uploaded',
+        entityType: 'EmployeeDocument',
+        entityId: document.id,
+        metadata: { employeeId, category: dto.category, sizeBytes: file.size },
+      },
+    });
+    return document;
+  }
+
+  async downloadDocument(organizationId: string, employeeId: string, documentId: string) {
+    const doc = await this.prisma.employeeDocument.findFirst({
+      where: { id: documentId, employeeId, employee: { organizationId } },
+      include: { file: true },
+    });
+    if (!doc) throw new NotFoundException('Document not found');
+    if (!doc.file) throw new NotFoundException('This document is a link, not an uploaded file');
+    return { fileName: doc.fileName ?? 'document', mimeType: doc.mimeType ?? 'application/octet-stream', data: doc.file.data };
+  }
+
   async removeDocument(organizationId: string, employeeId: string, documentId: string) {
     await this.findOne(organizationId, employeeId);
     const doc = await this.prisma.employeeDocument.findFirst({
       where: { id: documentId, employeeId },
     });
     if (!doc) throw new NotFoundException('Document not found');
+    // The stored file goes with it (onDelete: Cascade).
     return this.prisma.employeeDocument.delete({ where: { id: documentId } });
   }
 

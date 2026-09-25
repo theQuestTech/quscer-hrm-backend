@@ -26,7 +26,7 @@ const SALT_ROUNDS = 10;
 // Settings. Day counts follow the Pakistan Factories Act defaults (14 annual,
 // 10 casual, 16 sick) — the org's own policy may differ.
 const DEFAULT_LEAVE_TYPES = [
-  { name: 'Annual', isPaid: true, defaultAnnualDays: 14 },
+  { name: 'Annual', isPaid: true, defaultAnnualDays: 14, isEncashable: true },
   { name: 'Casual', isPaid: true, defaultAnnualDays: 10 },
   { name: 'Sick', isPaid: true, defaultAnnualDays: 16 },
   { name: 'Unpaid', isPaid: false, defaultAnnualDays: 0 },

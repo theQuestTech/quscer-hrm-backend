@@ -20,7 +20,9 @@ export interface UnpaidDaysInput {
   holidayKeys: Set<string>;
 }
 
-export function computeUnpaidDays(input: UnpaidDaysInput): number {
+// Unpaid weight (1 or 0.5) per day, keyed by dayKey. Final settlement uses
+// the per-day view because its daily rate changes from month to month.
+export function unpaidDayWeights(input: UnpaidDaysInput): Map<string, number> {
   const periodStart = startOfDayUtc(input.periodStart);
   const periodEnd = startOfDayUtc(input.periodEnd);
   const weights = new Map<string, number>();
@@ -47,5 +49,9 @@ export function computeUnpaidDays(input: UnpaidDaysInput): number {
     if (!weights.has(key)) weights.set(key, record.status === 'HALF_DAY' ? 0.5 : 1);
   }
 
-  return [...weights.values()].reduce((a, b) => a + b, 0);
+  return weights;
+}
+
+export function computeUnpaidDays(input: UnpaidDaysInput): number {
+  return [...unpaidDayWeights(input).values()].reduce((a, b) => a + b, 0);
 }

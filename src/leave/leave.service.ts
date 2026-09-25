@@ -5,13 +5,17 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { LeaveRequestStatus } from '@prisma/client';
-import { startOfDayUtc } from '../common/dates';
+import { Employee, LeaveRequestStatus, LeaveType } from '@prisma/client';
+import { startOfDayUtc, todayInTimeZone } from '../common/dates';
+import { allocationForYear } from './entitlement';
 import { countWorkingDays } from '../common/work-calendar';
 import { findEmployeeForUser, requireEmployeeForUser } from '../common/current-employee';
 import { hasPermission } from '../rbac/rbac.service';
 
 type CallingUser = { id: string; permissions?: string[] };
+
+// Requests still waiting on someone — they hold days against the balance.
+const OPEN_STATUSES = [LeaveRequestStatus.PENDING, LeaveRequestStatus.FIRST_APPROVED];
 
 @Injectable()
 export class LeaveService {
@@ -24,6 +28,10 @@ export class LeaveService {
         name: dto.name,
         isPaid: dto.isPaid ?? true,
         defaultAnnualDays: dto.defaultAnnualDays ?? 0,
+        accrual: dto.accrual,
+        maxCarryForwardDays: dto.maxCarryForwardDays,
+        isEncashable: dto.isEncashable,
+        allowNegativeBalance: dto.allowNegativeBalance,
       },
     });
   }
@@ -43,13 +51,13 @@ export class LeaveService {
     return leaveType;
   }
 
-  // WBS 3.10 — submit a leave request. Does NOT check/reserve balance at
-  // submission time on purpose — balance is only deducted on approval
-  // (below), so a pending request can't lock days a manager might reject.
+  // WBS 3.10 — submit a leave request. Days are only deducted on final
+  // approval, but a paid type (unless it allows going negative) must have
+  // enough balance left after the employee's other open requests.
   // Day count skips the org's weekend days and holidays (WBS 1.14).
   async createRequest(organizationId: string, userId: string, dto: any) {
     const employee = await requireEmployeeForUser(this.prisma, organizationId, userId);
-    await this.findLeaveType(organizationId, dto.leaveTypeId);
+    const leaveType = await this.findLeaveType(organizationId, dto.leaveTypeId);
     const startDate = startOfDayUtc(new Date(dto.startDate));
     const endDate = startOfDayUtc(new Date(dto.endDate));
 
@@ -64,7 +72,7 @@ export class LeaveService {
     const overlapping = await this.prisma.leaveRequest.count({
       where: {
         employeeId: employee.id,
-        status: { in: [LeaveRequestStatus.PENDING, LeaveRequestStatus.APPROVED] },
+        status: { in: [...OPEN_STATUSES, LeaveRequestStatus.APPROVED] },
         startDate: { lte: endDate },
         endDate: { gte: startDate },
       },
@@ -77,6 +85,7 @@ export class LeaveService {
     if (days === 0) {
       throw new BadRequestException('These dates fall entirely on weekends or holidays');
     }
+    await this.assertEnoughBalance(organizationId, employee, leaveType, startDate, days);
 
     return this.prisma.leaveRequest.create({
       data: {
@@ -118,16 +127,17 @@ export class LeaveService {
     });
   }
 
-  // WBS 3.10 — approval. Deducts from LeaveBalance here. If no balance row
-  // exists yet for the year, one is created with the leave type's
-  // defaultAnnualDays as the allocation (no mid-year proration yet — WBS 3.9).
+  // WBS 3.10 — approval. With one approval step the first "approve" is
+  // final. With two (org setting), the first moves the request to
+  // FIRST_APPROVED and a different person must give the final approval.
+  // Days come off the balance only on final approval. Either step can reject.
   async decide(organizationId: string, approverUserId: string, requestId: string, approve: boolean) {
     const request = await this.prisma.leaveRequest.findFirst({
       where: { id: requestId, organizationId },
-      include: { leaveType: true },
+      include: { leaveType: true, employee: true },
     });
     if (!request) throw new NotFoundException('Leave request not found');
-    if (request.status !== LeaveRequestStatus.PENDING) {
+    if (!OPEN_STATUSES.includes(request.status as any)) {
       throw new BadRequestException('This request has already been decided');
     }
 
@@ -138,16 +148,38 @@ export class LeaveService {
       throw new ForbiddenException('You cannot approve or reject your own leave request');
     }
 
+    const settings = await this.prisma.organizationLocaleSettings.findUnique({ where: { organizationId } });
+    const needsTwoSteps = (settings?.leaveApprovalSteps ?? 1) >= 2;
+    const isFirstStep = approve && needsTwoSteps && request.status === LeaveRequestStatus.PENDING;
+
+    if (request.status === LeaveRequestStatus.FIRST_APPROVED && request.firstApproverUserId === approverUserId) {
+      throw new ForbiddenException('The final approval must come from a different person than the first');
+    }
+    if (approve && !isFirstStep) {
+      // Balance may have changed since the request was made (another request
+      // approved, allocation lowered) — check again before deducting.
+      await this.assertEnoughBalance(
+        organizationId,
+        request.employee,
+        request.leaveType,
+        request.startDate,
+        request.days,
+        request.id,
+      );
+    }
+
     const updated = await this.prisma.leaveRequest.update({
       where: { id: requestId },
-      data: {
-        status: approve ? LeaveRequestStatus.APPROVED : LeaveRequestStatus.REJECTED,
-        approverId: approver?.id ?? null,
-        decidedAt: new Date(),
-      },
+      data: isFirstStep
+        ? { status: LeaveRequestStatus.FIRST_APPROVED, firstApproverUserId: approverUserId, firstApprovedAt: new Date() }
+        : {
+            status: approve ? LeaveRequestStatus.APPROVED : LeaveRequestStatus.REJECTED,
+            approverId: approver?.id ?? null,
+            decidedAt: new Date(),
+          },
     });
 
-    if (approve) {
+    if (approve && !isFirstStep) {
       await this.adjustUsedDays(request, request.days);
     }
 
@@ -155,7 +187,7 @@ export class LeaveService {
       data: {
         organizationId,
         actorUserId: approverUserId,
-        eventType: approve ? 'leave.approved' : 'leave.rejected',
+        eventType: isFirstStep ? 'leave.first_approved' : approve ? 'leave.approved' : 'leave.rejected',
         entityType: 'LeaveRequest',
         entityId: requestId,
         metadata: { employeeId: request.employeeId, days: request.days },
@@ -178,7 +210,7 @@ export class LeaveService {
     const isOwner = own?.id === request.employeeId;
     const isApprover = hasPermission(user, 'hrm.leave.approve');
 
-    if (request.status === LeaveRequestStatus.PENDING) {
+    if (OPEN_STATUSES.includes(request.status as any)) {
       if (!isOwner && !isApprover) throw new ForbiddenException('You can only cancel your own requests');
     } else if (request.status === LeaveRequestStatus.APPROVED) {
       if (!isApprover) throw new ForbiddenException('Ask your manager or HR to cancel approved leave');
@@ -211,7 +243,8 @@ export class LeaveService {
     delta: number,
   ) {
     const year = request.startDate.getUTCFullYear();
-    const leaveType = await this.prisma.leaveType.findUniqueOrThrow({ where: { id: request.leaveTypeId } });
+    // allocatedDays on a non-manual row is not read back — the allocation is
+    // always recomputed from the leave type's rules (see allocationForYear).
     await this.prisma.leaveBalance.upsert({
       where: {
         employeeId_leaveTypeId_year: {
@@ -224,16 +257,16 @@ export class LeaveService {
         employeeId: request.employeeId,
         leaveTypeId: request.leaveTypeId,
         year,
-        allocatedDays: leaveType.defaultAnnualDays,
+        allocatedDays: 0,
         usedDays: Math.max(delta, 0),
       },
       update: { usedDays: { increment: delta } },
     });
   }
 
-  // One row per leave type for the year: allocated / used / remaining. A
-  // type with no balance row yet shows its defaultAnnualDays as allocated —
-  // the same number approve() would create the row with.
+  // One row per leave type for the year: allocated / used / pending /
+  // remaining. Allocation follows the type's accrual and carry-forward rules
+  // unless HR set a manual figure for that year.
   async balances(organizationId: string, user: CallingUser, employeeId?: string, year?: number) {
     const own = await findEmployeeForUser(this.prisma, organizationId, user.id);
     const targetId = employeeId ?? own?.id;
@@ -244,23 +277,86 @@ export class LeaveService {
     const employee = await this.prisma.employee.findFirst({ where: { id: targetId, organizationId } });
     if (!employee) throw new NotFoundException('Employee not found');
 
-    const forYear = year ?? new Date().getUTCFullYear();
-    const [types, rows] = await Promise.all([
-      this.listLeaveTypes(organizationId),
-      this.prisma.leaveBalance.findMany({ where: { employeeId: targetId, year: forYear } }),
+    const today = await this.orgToday(organizationId);
+    const forYear = year ?? today.getUTCFullYear();
+    const types = await this.listLeaveTypes(organizationId);
+    return Promise.all(types.map((type) => this.balanceFor(employee, type, forYear, today)));
+  }
+
+  // Balance of one leave type for one year. `excludeRequestId` leaves a
+  // request out of the pending count (when re-checking that same request).
+  async balanceFor(
+    employee: Pick<Employee, 'id' | 'dateOfJoining'>,
+    type: LeaveType,
+    year: number,
+    asOf: Date,
+    excludeRequestId?: string,
+  ) {
+    const [rows, pending] = await Promise.all([
+      this.prisma.leaveBalance.findMany({
+        where: { employeeId: employee.id, leaveTypeId: type.id, year: { lte: year } },
+      }),
+      this.prisma.leaveRequest.aggregate({
+        _sum: { days: true },
+        where: {
+          employeeId: employee.id,
+          leaveTypeId: type.id,
+          status: { in: OPEN_STATUSES },
+          startDate: { gte: new Date(Date.UTC(year, 0, 1)), lt: new Date(Date.UTC(year + 1, 0, 1)) },
+          ...(excludeRequestId && { id: { not: excludeRequestId } }),
+        },
+      }),
     ]);
-    return types.map((type) => {
-      const row = rows.find((r) => r.leaveTypeId === type.id);
-      const allocatedDays = row?.allocatedDays ?? type.defaultAnnualDays;
-      const usedDays = row?.usedDays ?? 0;
-      return {
-        leaveType: type,
-        year: forYear,
-        allocatedDays,
-        usedDays,
-        remainingDays: allocatedDays - usedDays,
-      };
-    });
+    const byYear = new Map(rows.map((r) => [r.year, r]));
+    const allocatedDays = allocationForYear(
+      {
+        accrual: type.accrual,
+        yearlyDays: type.defaultAnnualDays,
+        maxCarryForwardDays: type.maxCarryForwardDays,
+        dateOfJoining: employee.dateOfJoining,
+        asOf,
+        rows: byYear,
+      },
+      year,
+    );
+    const usedDays = byYear.get(year)?.usedDays ?? 0;
+    const pendingDays = pending._sum.days ?? 0;
+    return {
+      leaveType: type,
+      year,
+      allocatedDays,
+      usedDays,
+      pendingDays,
+      remainingDays: allocatedDays - usedDays,
+      isManualAllocation: byYear.get(year)?.isManualAllocation ?? false,
+    };
+  }
+
+  private async assertEnoughBalance(
+    organizationId: string,
+    employee: Pick<Employee, 'id' | 'dateOfJoining'>,
+    type: LeaveType,
+    startDate: Date,
+    days: number,
+    excludeRequestId?: string,
+  ) {
+    if (!type.isPaid || type.allowNegativeBalance) return;
+    const today = await this.orgToday(organizationId);
+    // Monthly accrual: count what will have accrued by the leave's start.
+    const asOf = startDate > today ? startDate : today;
+    const balance = await this.balanceFor(employee, type, startDate.getUTCFullYear(), asOf, excludeRequestId);
+    const available = balance.remainingDays - balance.pendingDays;
+    if (days > available) {
+      throw new BadRequestException(
+        `Not enough ${type.name} leave: ${days} day(s) requested, ${Math.max(available, 0)} available` +
+          (balance.pendingDays > 0 ? ` (${balance.pendingDays} day(s) already waiting for approval)` : ''),
+      );
+    }
+  }
+
+  private async orgToday(organizationId: string) {
+    const settings = await this.prisma.organizationLocaleSettings.findUnique({ where: { organizationId } });
+    return todayInTimeZone(settings?.defaultTimezone);
   }
 
   async setAllocation(organizationId: string, actorUserId: string, dto: any) {
@@ -280,9 +376,10 @@ export class LeaveService {
         employeeId: dto.employeeId,
         leaveTypeId: dto.leaveTypeId,
         year: dto.year,
-        allocatedDays: dto.allocatedDays,
+        allocatedDays: dto.allocatedDays ?? 0,
+        isManualAllocation: dto.allocatedDays !== null,
       },
-      update: { allocatedDays: dto.allocatedDays },
+      update: { allocatedDays: dto.allocatedDays ?? 0, isManualAllocation: dto.allocatedDays !== null },
     });
     await this.prisma.auditEvent.create({
       data: {

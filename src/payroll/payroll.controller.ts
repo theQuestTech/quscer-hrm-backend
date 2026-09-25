@@ -1,10 +1,11 @@
-import { Body, Controller, Delete, Get, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionGuard, RequirePermission } from '../rbac/permission.guard';
 import { PayrollService } from './payroll.service';
 import { PayslipPdfService } from './payslip-pdf.service';
-import { UpsertSalaryStructureDto, CreatePayrollRunDto, CreateLoanDto } from './dto/payroll.dto';
+import { UpsertSalaryStructureDto, CreatePayrollRunDto, CreateLoanDto, UpsertFinalSettlementDto } from './dto/payroll.dto';
+import { SettlementService } from './settlement.service';
 
 @Controller()
 @UseGuards(JwtAuthGuard, PermissionGuard)
@@ -12,7 +13,54 @@ export class PayrollController {
   constructor(
     private payrollService: PayrollService,
     private payslipPdfService: PayslipPdfService,
+    private settlementService: SettlementService,
   ) {}
+
+  // --- WBS 4.14 — final settlement -------------------------------------
+  // Same maker/checker split as payroll runs: payroll.run drafts,
+  // payroll.approve approves and marks it paid.
+
+  @Get('employees/:id/final-settlement')
+  @RequirePermission('hrm.payroll.read')
+  getSettlement(@Req() req: any, @Param('id') employeeId: string) {
+    return this.settlementService.get(req.user.organizationId, employeeId);
+  }
+
+  @Post('employees/:id/final-settlement')
+  @RequirePermission('hrm.payroll.run')
+  upsertSettlement(@Req() req: any, @Param('id') employeeId: string, @Body() dto: UpsertFinalSettlementDto) {
+    return this.settlementService.upsertDraft(req.user.organizationId, req.user.id, employeeId, dto);
+  }
+
+  @Patch('final-settlements/:id/approve')
+  @RequirePermission('hrm.payroll.approve')
+  approveSettlement(@Req() req: any, @Param('id') id: string) {
+    return this.settlementService.approve(req.user.organizationId, req.user.id, id);
+  }
+
+  @Patch('final-settlements/:id/mark-paid')
+  @RequirePermission('hrm.payroll.approve')
+  markSettlementPaid(@Req() req: any, @Param('id') id: string) {
+    return this.settlementService.markPaid(req.user.organizationId, req.user.id, id);
+  }
+
+  @Delete('final-settlements/:id')
+  @RequirePermission('hrm.payroll.run')
+  deleteSettlement(@Req() req: any, @Param('id') id: string) {
+    return this.settlementService.remove(req.user.organizationId, req.user.id, id);
+  }
+
+  @Get('final-settlements/:id/pdf')
+  @RequirePermission('hrm.payroll.read')
+  async settlementPdf(@Req() req: any, @Param('id') id: string, @Res() res: Response) {
+    const data = await this.settlementService.pdfData(req.user.organizationId, id);
+    const pdf = await this.payslipPdfService.generateSettlement(data);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="final-settlement-${data.employeeNumber.replace(/[^A-Za-z0-9_-]/g, '_')}.pdf"`,
+    });
+    res.send(pdf);
+  }
 
   @Post('employees/:id/salary-structure')
   @RequirePermission('hrm.payroll.write')

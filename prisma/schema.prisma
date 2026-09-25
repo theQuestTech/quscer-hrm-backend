@@ -19,19 +19,19 @@ datasource db {
 // 1.3 — Tenancy
 // ----------------------------------------------------------------------------
 model Organization {
-  id                String   @id @default(cuid())
-  name              String
-  quscerOrgId       String?  @unique   // set once linked to Quscer OS (task 6.1) — null until then
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id          String   @id @default(cuid())
+  name        String
+  quscerOrgId String?  @unique // set once linked to Quscer OS (task 6.1) — null until then
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  users             User[]
-  branches          Branch[]
-  roles             Role[]
-  auditEvents       AuditEvent[]
-  employees         Employee[]
-  localeSettings    OrganizationLocaleSettings?
-  holidays          Holiday[]
+  users          User[]
+  branches       Branch[]
+  roles          Role[]
+  auditEvents    AuditEvent[]
+  employees      Employee[]
+  localeSettings OrganizationLocaleSettings?
+  holidays       Holiday[]
 
   @@index([quscerOrgId])
 }
@@ -39,16 +39,16 @@ model Organization {
 model User {
   id             String   @id @default(cuid())
   organizationId String
-  quscerUserId   String?  @unique   // set once linked to Quscer OS (task 6.1) — null until then
+  quscerUserId   String?  @unique // set once linked to Quscer OS (task 6.1) — null until then
   email          String
-  passwordHash   String?           // null once auth is delegated to Quscer OS SSO
+  passwordHash   String? // null once auth is delegated to Quscer OS SSO
   firstName      String
   lastName       String
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization   Organization         @relation(fields: [organizationId], references: [id])
+  organization    Organization         @relation(fields: [organizationId], references: [id])
   roleAssignments UserRoleAssignment[]
 
   @@unique([organizationId, email])
@@ -63,8 +63,8 @@ model User {
 // never infer HR access from sales access).
 // ----------------------------------------------------------------------------
 model Permission {
-  id          String   @id @default(cuid())
-  key         String   @unique
+  id          String  @id @default(cuid())
+  key         String  @unique
   description String?
 
   rolePermissions RolePermission[]
@@ -73,13 +73,13 @@ model Permission {
 model Role {
   id             String   @id @default(cuid())
   organizationId String
-  name           String            // "HR Admin", "Payroll Approver", "Manager", "Employee"
+  name           String // "HR Admin", "Payroll Approver", "Manager", "Employee"
   isSystemRole   Boolean  @default(false)
   createdAt      DateTime @default(now())
 
-  organization   Organization         @relation(fields: [organizationId], references: [id])
-  permissions    RolePermission[]
-  assignments    UserRoleAssignment[]
+  organization Organization         @relation(fields: [organizationId], references: [id])
+  permissions  RolePermission[]
+  assignments  UserRoleAssignment[]
 
   @@index([organizationId])
 }
@@ -88,8 +88,8 @@ model RolePermission {
   roleId       String
   permissionId String
 
-  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
   @@id([roleId, permissionId])
 }
@@ -102,8 +102,8 @@ model UserRoleAssignment {
   assignedAt     DateTime @default(now())
   assignedById   String?
 
-  user           User     @relation(fields: [userId], references: [id])
-  role           Role     @relation(fields: [roleId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+  role Role @relation(fields: [roleId], references: [id])
 
   @@unique([userId, roleId])
   @@index([userId, organizationId])
@@ -116,13 +116,13 @@ model AuditEvent {
   id             String   @id @default(cuid())
   organizationId String
   actorUserId    String?
-  eventType      String            // "employee.created", "payroll.approved", etc.
+  eventType      String // "employee.created", "payroll.approved", etc.
   entityType     String
   entityId       String
   metadata       Json     @default("{}")
   createdAt      DateTime @default(now())
 
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
 
   @@index([organizationId, entityType, entityId])
   @@index([organizationId, createdAt])
@@ -132,43 +132,43 @@ model AuditEvent {
 // 1.13 — Branches, departments, designations, cost centres
 // ----------------------------------------------------------------------------
 model Branch {
-  id             String   @id @default(cuid())
+  id             String  @id @default(cuid())
   organizationId String
   name           String
-  countryCode    String            // ISO 3166-1 alpha-2, e.g. "PK"
-  regionCode     String?           // province/state code, e.g. "PB" | "SD" | "KP" | "BA"
-  timezone       String            // IANA tz, e.g. "Asia/Karachi"
-  isActive       Boolean  @default(true)
+  countryCode    String // ISO 3166-1 alpha-2, e.g. "PK"
+  regionCode     String? // province/state code, e.g. "PB" | "SD" | "KP" | "BA"
+  timezone       String // IANA tz, e.g. "Asia/Karachi"
+  isActive       Boolean @default(true)
 
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  departments    Department[]
-  costCentres    CostCentre[]
-  employees      Employee[]
+  organization Organization @relation(fields: [organizationId], references: [id])
+  departments  Department[]
+  costCentres  CostCentre[]
+  employees    Employee[]
 
   @@index([organizationId])
 }
 
 model Department {
-  id             String   @id @default(cuid())
+  id             String  @id @default(cuid())
   organizationId String
   branchId       String?
   name           String
-  parentId       String?           // self-relation for nested departments
+  parentId       String? // self-relation for nested departments
 
-  branch         Branch?  @relation(fields: [branchId], references: [id])
-  employees      Employee[]
+  branch    Branch?    @relation(fields: [branchId], references: [id])
+  employees Employee[]
 
   @@index([organizationId])
 }
 
 model CostCentre {
-  id             String   @id @default(cuid())
+  id             String  @id @default(cuid())
   organizationId String
   branchId       String?
-  code           String            // shared with Invoicing's financial reports once connected
+  code           String // shared with Invoicing's financial reports once connected
   name           String
 
-  branch         Branch?  @relation(fields: [branchId], references: [id])
+  branch Branch? @relation(fields: [branchId], references: [id])
 
   @@unique([organizationId, code])
 }
@@ -178,16 +178,21 @@ model CostCentre {
 // ----------------------------------------------------------------------------
 model OrganizationLocaleSettings {
   organizationId       String   @id
-  defaultCountryCode   String            // ISO 3166-1 alpha-2, e.g. "PK"
-  defaultCurrency      String            // ISO 4217, e.g. "PKR"
-  defaultTimezone      String            // IANA tz
-  loadedStatutoryPacks String[]          // e.g. ["PK"] — which country packs are active
+  defaultCountryCode   String // ISO 3166-1 alpha-2, e.g. "PK"
+  defaultCurrency      String // ISO 4217, e.g. "PKR"
+  defaultTimezone      String // IANA tz
+  loadedStatutoryPacks String[] // e.g. ["PK"] — which country packs are active
   // WBS 1.14 — workweek. JS day numbers (0 = Sunday … 6 = Saturday). Leave
   // day counts skip these days and org/branch holidays.
   weekendDays          Int[]    @default([0, 6])
+  // WBS 3.10 — 1 = any leave approver decides; 2 = a first approval
+  // (usually the manager) then a second, different approver.
+  leaveApprovalSteps   Int      @default(1)
+  // WBS 3.4 — minutes after shift start before a check-in counts as late.
+  lateGraceMinutes     Int      @default(15)
   updatedAt            DateTime @updatedAt
 
-  organization         Organization @relation(fields: [organizationId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
 }
 
 // WBS 1.14 — holiday calendar. branchId null = applies to the whole org.
@@ -195,11 +200,11 @@ model Holiday {
   id             String   @id @default(cuid())
   organizationId String
   branchId       String?
-  date           DateTime            // midnight UTC of the calendar day, same convention as AttendanceRecord
+  date           DateTime // midnight UTC of the calendar day, same convention as AttendanceRecord
   name           String
   createdAt      DateTime @default(now())
 
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
 
   @@index([organizationId, date])
 }
@@ -232,18 +237,18 @@ enum StatutoryRuleType {
 model StatutoryRule {
   id            String            @id @default(cuid())
   ruleType      StatutoryRuleType
-  countryCode   String                     // "PK"
-  regionCode    String?                    // "PB" | "SD" | "KP" | "BA" | null = national
-  skillTier     String?                    // "unskilled" | "semi_skilled" | "skilled"
+  countryCode   String // "PK"
+  regionCode    String? // "PB" | "SD" | "KP" | "BA" | null = national
+  skillTier     String? // "unskilled" | "semi_skilled" | "skilled"
   effectiveFrom DateTime
-  effectiveTo   DateTime?                  // null = still current
+  effectiveTo   DateTime? // null = still current
   // Shape varies by ruleType — see prisma/seed.ts for real examples:
   //   INCOME_TAX:      { type: "slab", slabs: [{ upTo, rate }, ...], surchargeThreshold?, surchargeRate? }
   //   PENSION_FUND:     { type: "flat_percent_of_min_wage", employerPct, employeePct }
   //   SOCIAL_SECURITY:  { type: "percent_of_wage", employerPct, wageCeiling }
   //   MINIMUM_WAGE:     { type: "flat_amount", amount, currency }
   formula       Json
-  sourceRef     String?                    // citation: which budget/notification this came from
+  sourceRef     String? // citation: which budget/notification this came from
   createdAt     DateTime          @default(now())
 
   @@index([countryCode, regionCode, ruleType, effectiveFrom])
@@ -262,7 +267,7 @@ model StatutoryRule {
 enum SalaryComponentType {
   EARNING
   DEDUCTION
-  EMPLOYER_CONTRIBUTION   // doesn't reduce net pay, but tracked for cost/reporting
+  EMPLOYER_CONTRIBUTION // doesn't reduce net pay, but tracked for cost/reporting
 }
 
 // Org-level catalog — "Basic", "House Rent Allowance", "Transport Allowance",
@@ -281,51 +286,51 @@ model SalaryComponent {
 }
 
 model EmployeeSalaryStructure {
-  id             String   @id @default(cuid())
-  employeeId     String   @unique
-  currency       String            // ISO 4217 — see CurrencyRateSnapshot for display conversion only
-  basicSalary    Decimal
-  effectiveFrom  DateTime
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id            String   @id @default(cuid())
+  employeeId    String   @unique
+  currency      String // ISO 4217 — see CurrencyRateSnapshot for display conversion only
+  basicSalary   Decimal
+  effectiveFrom DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  employee       Employee @relation(fields: [employeeId], references: [id])
-  components     EmployeeSalaryComponent[]
+  employee   Employee                  @relation(fields: [employeeId], references: [id])
+  components EmployeeSalaryComponent[]
 }
 
 model EmployeeSalaryComponent {
   id                String  @id @default(cuid())
   salaryStructureId String
   componentId       String
-  amount            Decimal           // flat amount per pay period, in the structure's currency
+  amount            Decimal // flat amount per pay period, in the structure's currency
 
-  salaryStructure   EmployeeSalaryStructure @relation(fields: [salaryStructureId], references: [id], onDelete: Cascade)
-  component         SalaryComponent         @relation(fields: [componentId], references: [id])
+  salaryStructure EmployeeSalaryStructure @relation(fields: [salaryStructureId], references: [id], onDelete: Cascade)
+  component       SalaryComponent         @relation(fields: [componentId], references: [id])
 
   @@unique([salaryStructureId, componentId])
 }
 
 enum PayrollRunStatus {
   DRAFT
-  SUBMITTED    // maker has run it, awaiting checker
-  APPROVED     // checker approved — loan balances decremented, immutable from here
-  LOCKED       // paid out, fully immutable
+  SUBMITTED // maker has run it, awaiting checker
+  APPROVED // checker approved — loan balances decremented, immutable from here
+  LOCKED // paid out, fully immutable
 }
 
 model PayrollRun {
-  id              String   @id @default(cuid())
-  organizationId  String
-  periodStart     DateTime
-  periodEnd       DateTime
-  payDate         DateTime
-  status          PayrollRunStatus @default(DRAFT)
-  runByUserId     String?
-  submittedAt     DateTime?
+  id               String           @id @default(cuid())
+  organizationId   String
+  periodStart      DateTime
+  periodEnd        DateTime
+  payDate          DateTime
+  status           PayrollRunStatus @default(DRAFT)
+  runByUserId      String?
+  submittedAt      DateTime?
   approvedByUserId String?
-  approvedAt      DateTime?
-  createdAt       DateTime @default(now())
+  approvedAt       DateTime?
+  createdAt        DateTime         @default(now())
 
-  lineItems       PayrollLineItem[]
+  lineItems PayrollLineItem[]
 
   @@unique([organizationId, periodStart, periodEnd])
   @@index([organizationId, status])
@@ -346,8 +351,8 @@ model PayrollLineItem {
   breakdown       Json
   createdAt       DateTime @default(now())
 
-  payrollRun      PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
-  employee        Employee   @relation(fields: [employeeId], references: [id])
+  payrollRun PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employee   Employee   @relation(fields: [employeeId], references: [id])
 
   @@unique([payrollRunId, employeeId])
 }
@@ -367,7 +372,7 @@ model EmployeeLoan {
   startDate         DateTime
   createdAt         DateTime   @default(now())
 
-  employee          Employee @relation(fields: [employeeId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
 }
 
 // ============================================================================
@@ -395,51 +400,56 @@ enum EmploymentType {
 }
 
 model Employee {
-  id             String   @id @default(cuid())
+  id             String  @id @default(cuid())
   organizationId String
-  userId         String?  @unique          // set only if this employee also has app login access
+  userId         String? @unique // set only if this employee also has app login access
   branchId       String?
   departmentId   String?
-  managerId      String?                   // self-relation — WBS 2.6
+  managerId      String? // self-relation — WBS 2.6
+  shiftId        String? // WBS 3.1 — working hours used for late/overtime
 
-  employeeNumber String                    // unique per org, see @@unique below
+  employeeNumber String // unique per org, see @@unique below
   firstName      String
   lastName       String
   email          String
   phone          String?
-  designation    String                    // job title, free text for now
+  designation    String // job title, free text for now
 
-  status         EmployeeStatus   @default(ACTIVE)
-  employmentType EmploymentType   @default(FULL_TIME)
+  status         EmployeeStatus @default(ACTIVE)
+  employmentType EmploymentType @default(FULL_TIME)
 
-  dateOfJoining     DateTime
-  probationEndDate  DateTime?              // WBS 2.4 — basic field, not a full workflow yet
-  confirmedAt       DateTime?
-  contractEndDate   DateTime?              // for CONTRACT/INTERN types
+  dateOfJoining    DateTime
+  probationEndDate DateTime? // WBS 2.4 — basic field, not a full workflow yet
+  confirmedAt      DateTime?
+  contractEndDate  DateTime? // for CONTRACT/INTERN types
+  exitDate         DateTime? // last working day, set when a final settlement is approved (WBS 2.9/4.14)
 
   // Statutory context — defaults from Branch if not overridden per-employee.
   // Read by the Phase 4 payroll engine against StatutoryRule.
-  countryCode    String?
-  regionCode     String?
+  countryCode String?
+  regionCode  String?
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  organization    Organization @relation(fields: [organizationId], references: [id])
-  branch          Branch?      @relation(fields: [branchId], references: [id])
-  department      Department?  @relation(fields: [departmentId], references: [id])
-  manager         Employee?    @relation("ManagerToReports", fields: [managerId], references: [id])
-  directReports   Employee[]   @relation("ManagerToReports")
+  organization  Organization @relation(fields: [organizationId], references: [id])
+  branch        Branch?      @relation(fields: [branchId], references: [id])
+  department    Department?  @relation(fields: [departmentId], references: [id])
+  manager       Employee?    @relation("ManagerToReports", fields: [managerId], references: [id])
+  shift         Shift?       @relation(fields: [shiftId], references: [id])
+  directReports Employee[]   @relation("ManagerToReports")
 
-  emergencyContacts EmergencyContact[]
-  documents         EmployeeDocument[]
-  bankDetail        EmployeeBankDetail?
-  attendanceRecords AttendanceRecord[]
-  leaveBalances     LeaveBalance[]
-  leaveRequests     LeaveRequest[]
-  salaryStructure   EmployeeSalaryStructure?
-  payrollLineItems  PayrollLineItem[]
-  loans             EmployeeLoan[]
+  emergencyContacts     EmergencyContact[]
+  documents             EmployeeDocument[]
+  bankDetail            EmployeeBankDetail?
+  attendanceRecords     AttendanceRecord[]
+  leaveBalances         LeaveBalance[]
+  leaveRequests         LeaveRequest[]
+  salaryStructure       EmployeeSalaryStructure?
+  payrollLineItems      PayrollLineItem[]
+  loans                 EmployeeLoan[]
+  attendanceCorrections AttendanceCorrection[]
+  finalSettlement       FinalSettlement?
 
   @@unique([organizationId, employeeNumber])
   @@index([organizationId, status])
@@ -451,11 +461,11 @@ model EmergencyContact {
   id           String  @id @default(cuid())
   employeeId   String
   name         String
-  relationship String            // "Spouse", "Parent", "Sibling", etc. — free text, not an enum
+  relationship String // "Spouse", "Parent", "Sibling", etc. — free text, not an enum
   phone        String
   isPrimary    Boolean @default(false)
 
-  employee     Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([employeeId])
 }
@@ -464,15 +474,30 @@ model EmergencyContact {
 model EmployeeDocument {
   id         String    @id @default(cuid())
   employeeId String
-  category   String              // "CNIC", "Contract", "Degree", etc. — free text for now
-  fileUrl    String              // storage URL — actual upload/storage service not built yet
+  category   String // "CNIC", "Contract", "Degree", etc. — free text for now
+  fileUrl    String? // an external link, OR an uploaded file (see EmployeeDocumentFile)
+  fileName   String? // set for uploaded files
+  mimeType   String?
+  sizeBytes  Int?
   expiryDate DateTime?
   uploadedAt DateTime  @default(now())
 
-  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee Employee              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  file     EmployeeDocumentFile?
 
   @@index([employeeId])
   @@index([employeeId, expiryDate])
+}
+
+// WBS 1.10 — uploaded file bytes, kept in their own table so listing
+// documents never loads file contents. Stored in Postgres for now (files are
+// capped at 5 MB); moving to Supabase Storage/S3 later only changes where
+// `data` lives, not the API.
+model EmployeeDocumentFile {
+  documentId String @id
+  data       Bytes
+
+  document EmployeeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
 }
 
 // WBS 2.3 — bank details. accountNumber is encrypted at rest (WBS 6.12,
@@ -483,11 +508,11 @@ model EmployeeBankDetail {
   employeeId         String  @unique
   bankName           String
   accountTitle       String
-  accountNumber      String            // AES-256-GCM ciphertext ("enc:v1:..."), never plaintext
+  accountNumber      String // AES-256-GCM ciphertext ("enc:v1:..."), never plaintext
   accountNumberLast4 String?
   branchCode         String?
 
-  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 }
 
 // ============================================================================
@@ -503,10 +528,12 @@ model EmployeeBankDetail {
 model Shift {
   id             String   @id @default(cuid())
   organizationId String
-  name           String            // "General Shift", "Night Shift"
-  startTime      String            // "09:00" — 24h HH:mm, timezone comes from the employee's Branch
-  endTime        String            // "18:00"
+  name           String // "General Shift", "Night Shift"
+  startTime      String // "09:00" — 24h HH:mm, timezone comes from the employee's Branch
+  endTime        String // "18:00" — earlier than startTime means the shift ends next day
   createdAt      DateTime @default(now())
+
+  employees Employee[]
 
   @@index([organizationId])
 }
@@ -522,37 +549,80 @@ enum AttendanceStatus {
 enum AttendanceSource {
   MANUAL
   APP_CHECKIN
-  BIOMETRIC   // not wired to a real device yet (WBS 3.6) — reserved for that adapter's output
+  BIOMETRIC // not wired to a real device yet (WBS 3.6) — reserved for that adapter's output
 }
 
 model AttendanceRecord {
-  id             String   @id @default(cuid())
-  organizationId String
-  employeeId     String
-  date           DateTime            // date-only in practice; store at midnight UTC and treat as a calendar day
-  checkIn        DateTime?
-  checkOut       DateTime?
-  status         AttendanceStatus @default(PRESENT)
-  source         AttendanceSource @default(MANUAL)
-  notes          String?
-  createdAt      DateTime @default(now())
+  id               String           @id @default(cuid())
+  organizationId   String
+  employeeId       String
+  date             DateTime // date-only in practice; store at midnight UTC and treat as a calendar day
+  checkIn          DateTime?
+  checkOut         DateTime?
+  status           AttendanceStatus @default(PRESENT)
+  source           AttendanceSource @default(MANUAL)
+  notes            String?
+  // WBS 3.4 — worked out from the employee's shift when they check in/out
+  lateMinutes      Int              @default(0)
+  earlyExitMinutes Int              @default(0)
+  overtimeMinutes  Int              @default(0)
+  workedMinutes    Int?
+  createdAt        DateTime         @default(now())
 
-  employee       Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
-  @@unique([employeeId, date])   // one record per employee per day
+  @@unique([employeeId, date]) // one record per employee per day
   @@index([organizationId, date])
+}
+
+// WBS 3.12 — an employee asks for a missed or wrong check-in/out to be fixed;
+// a manager approves it and the attendance record is updated.
+enum CorrectionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model AttendanceCorrection {
+  id                String           @id @default(cuid())
+  organizationId    String
+  employeeId        String
+  date              DateTime // calendar day, midnight UTC
+  checkIn           DateTime?
+  checkOut          DateTime?
+  reason            String
+  status            CorrectionStatus @default(PENDING)
+  requestedByUserId String
+  decidedByUserId   String?
+  decidedAt         DateTime?
+  createdAt         DateTime         @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+  @@index([employeeId])
+}
+
+enum LeaveAccrual {
+  ANNUAL // full year's days available from 1 January (prorated in the joining year)
+  MONTHLY // days build up month by month through the year
 }
 
 // WBS 3.8 — leave type catalog, per-org
 model LeaveType {
-  id                 String   @id @default(cuid())
-  organizationId     String
-  name               String            // "Annual", "Sick", "Unpaid", "Casual"
-  isPaid             Boolean  @default(true)
-  defaultAnnualDays  Int      @default(0)
+  id                   String       @id @default(cuid())
+  organizationId       String
+  name                 String // "Annual", "Sick", "Unpaid", "Casual"
+  isPaid               Boolean      @default(true)
+  defaultAnnualDays    Int          @default(0)
+  // WBS 3.9 — accrual, carry-forward and encashment rules
+  accrual              LeaveAccrual @default(ANNUAL)
+  maxCarryForwardDays  Float        @default(0) // unused days that move to next year (0 = none)
+  isEncashable         Boolean      @default(false) // paid out in the final settlement
+  allowNegativeBalance Boolean      @default(false) // may employees request more than they have?
 
-  balances           LeaveBalance[]
-  requests           LeaveRequest[]
+  balances LeaveBalance[]
+  requests LeaveRequest[]
 
   @@index([organizationId])
 }
@@ -560,21 +630,25 @@ model LeaveType {
 // WBS 3.9 — simplified: allocated vs. used per employee per year.
 // No carry-forward/proration logic yet — see README for what that needs.
 model LeaveBalance {
-  id             String   @id @default(cuid())
-  employeeId     String
-  leaveTypeId    String
-  year           Int
-  allocatedDays  Float
-  usedDays       Float    @default(0)
+  id                 String  @id @default(cuid())
+  employeeId         String
+  leaveTypeId        String
+  year               Int
+  allocatedDays      Float
+  usedDays           Float   @default(0)
+  // true once HR sets allocatedDays by hand; otherwise the entitlement is
+  // worked out from the leave type's rules and allocatedDays is ignored.
+  isManualAllocation Boolean @default(false)
 
-  employee       Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  leaveType      LeaveType @relation(fields: [leaveTypeId], references: [id])
+  employee  Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType LeaveType @relation(fields: [leaveTypeId], references: [id])
 
   @@unique([employeeId, leaveTypeId, year])
 }
 
 enum LeaveRequestStatus {
   PENDING
+  FIRST_APPROVED // two-step approval: waiting for the second approver
   APPROVED
   REJECTED
   CANCELLED
@@ -583,22 +657,68 @@ enum LeaveRequestStatus {
 // WBS 3.10 — request + single-level approval (multi-level approval chains
 // are a later enhancement, not built here)
 model LeaveRequest {
-  id             String   @id @default(cuid())
-  organizationId String
-  employeeId     String
-  leaveTypeId    String
-  startDate      DateTime
-  endDate        DateTime
-  days           Float             // computed at request time, not recalculated later
-  reason         String?
-  status         LeaveRequestStatus @default(PENDING)
-  approverId     String?           // Employee.id of whoever approved/rejected
-  decidedAt      DateTime?
-  createdAt      DateTime @default(now())
+  id                  String             @id @default(cuid())
+  organizationId      String
+  employeeId          String
+  leaveTypeId         String
+  startDate           DateTime
+  endDate             DateTime
+  days                Float // computed at request time, not recalculated later
+  reason              String?
+  status              LeaveRequestStatus @default(PENDING)
+  approverId          String? // Employee.id of whoever approved/rejected
+  decidedAt           DateTime?
+  firstApproverUserId String? // two-step approval: who gave the first approval
+  firstApprovedAt     DateTime?
+  createdAt           DateTime           @default(now())
 
-  employee       Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  leaveType      LeaveType @relation(fields: [leaveTypeId], references: [id])
+  employee  Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType LeaveType @relation(fields: [leaveTypeId], references: [id])
 
   @@index([organizationId, status])
   @@index([employeeId])
+}
+
+// ============================================================================
+// WBS 2.9 / 4.14 — exit and final settlement
+// ============================================================================
+
+enum ExitReason {
+  RESIGNATION
+  TERMINATION
+  END_OF_CONTRACT
+  RETIREMENT
+  OTHER
+}
+
+enum SettlementStatus {
+  DRAFT // can be recalculated
+  APPROVED // employee marked as left, loans closed; numbers are final
+  PAID
+}
+
+model FinalSettlement {
+  id               String           @id @default(cuid())
+  organizationId   String
+  employeeId       String           @unique
+  lastWorkingDay   DateTime
+  reason           ExitReason
+  status           SettlementStatus @default(DRAFT)
+  currency         String
+  totalEarnings    Decimal
+  totalDeductions  Decimal
+  netAmount        Decimal // negative = the employee owes the company
+  // [{ label, type: "earning" | "deduction", amount, detail? }]
+  breakdown        Json
+  inputs           Json // what HR entered (gratuity on/off, notice days, adjustments)
+  createdByUserId  String
+  approvedByUserId String?
+  approvedAt       DateTime?
+  paidAt           DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([organizationId, status])
 }

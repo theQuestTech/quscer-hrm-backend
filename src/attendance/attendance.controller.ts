@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionGuard, RequirePermission } from '../rbac/permission.guard';
 import { AttendanceService } from './attendance.service';
-import { MarkAttendanceDto } from './dto/mark-attendance.dto';
+import { MarkAttendanceDto, QueryCorrectionsDto, RequestCorrectionDto } from './dto/mark-attendance.dto';
 import { QueryAttendanceDto, QueryRegisterDto } from './dto/query-attendance.dto';
 
 @Controller('attendance')
@@ -51,6 +51,32 @@ export class AttendanceController {
   @RequirePermission('hrm.attendance.approve')
   register(@Req() req: any, @Query() query: QueryRegisterDto) {
     return this.attendanceService.register(req.user.organizationId, query.date);
+  }
+
+  // Employees ask for their own times to be fixed.
+  @Post('corrections')
+  @RequirePermission('hrm.attendance.read')
+  requestCorrection(@Req() req: any, @Body() dto: RequestCorrectionDto) {
+    return this.attendanceService.requestCorrection(req.user.organizationId, req.user.id, dto);
+  }
+
+  // Without hrm.attendance.approve this only returns the caller's own.
+  @Get('corrections')
+  @RequirePermission('hrm.attendance.read')
+  listCorrections(@Req() req: any, @Query() query: QueryCorrectionsDto) {
+    return this.attendanceService.listCorrections(req.user.organizationId, req.user, query.status);
+  }
+
+  @Patch('corrections/:id/approve')
+  @RequirePermission('hrm.attendance.approve')
+  approveCorrection(@Req() req: any, @Param('id') id: string) {
+    return this.attendanceService.decideCorrection(req.user.organizationId, req.user.id, id, true);
+  }
+
+  @Patch('corrections/:id/reject')
+  @RequirePermission('hrm.attendance.approve')
+  rejectCorrection(@Req() req: any, @Param('id') id: string) {
+    return this.attendanceService.decideCorrection(req.user.organizationId, req.user.id, id, false);
   }
 
   // No employeeId = the caller's own history. Someone else's needs
