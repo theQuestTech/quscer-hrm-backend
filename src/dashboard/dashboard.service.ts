@@ -300,25 +300,43 @@ export class DashboardService {
     };
   }
 
+  // Latest audit events as sentences. The same person doing the same thing
+  // several times in a row (e.g. marking a whole register) becomes one line
+  // with a count.
   private async companyActivity(organizationId: string) {
     const events = await this.prisma.auditEvent.findMany({
       where: { organizationId },
       orderBy: { createdAt: 'desc' },
-      take: 6,
+      take: 60,
     });
     const actorIds = [...new Set(events.map((e) => e.actorUserId).filter((x): x is string => !!x))];
     const actors = await this.prisma.user.findMany({
       where: { id: { in: actorIds } },
       select: { id: true, firstName: true, lastName: true },
     });
-    return events.map((e) => {
+    const lines: { kind: string; text: string; at: Date; key: string; count: number }[] = [];
+    for (const e of events) {
+      const key = `${e.actorUserId}|${e.eventType}`;
+      const last = lines[lines.length - 1];
+      if (last?.key === key) {
+        last.count += 1;
+        continue;
+      }
+      if (lines.length === 6) break;
       const actor = actors.find((a) => a.id === e.actorUserId);
-      return {
+      lines.push({
         kind: activityKind(e.eventType),
         text: `${actor ? `${actor.firstName} ${actor.lastName}` : 'Someone'} ${activityPhrase(e.eventType)}`,
         at: e.createdAt,
-      };
-    });
+        key,
+        count: 1,
+      });
+    }
+    return lines.map(({ kind, text, at, count }) => ({
+      kind,
+      text: count > 1 ? `${text} (${count} times)` : text,
+      at,
+    }));
   }
 
   private async orgToday(organizationId: string) {
