@@ -11,6 +11,7 @@ import { allocationForYear } from './entitlement';
 import { countWorkingDays } from '../common/work-calendar';
 import { findEmployeeForUser, requireEmployeeForUser } from '../common/current-employee';
 import { hasPermission } from '../rbac/rbac.service';
+import { approverScope, assertInScope } from '../common/approver-scope';
 
 type CallingUser = { id: string; permissions?: string[] };
 
@@ -101,22 +102,34 @@ export class LeaveService {
     });
   }
 
-  // Approvers (hrm.leave.approve) see everyone's requests; everyone else
-  // only ever sees their own, whatever employeeId they pass.
+  // HR approvers see everyone's requests, a manager sees their team's (and
+  // their own), and everyone else only ever sees their own, whatever
+  // employeeId they pass.
   async listRequests(organizationId: string, user: CallingUser, employeeId?: string, status?: string) {
     let targetEmployeeId = employeeId;
+    let teamIds: string[] | undefined;
+    const own = await findEmployeeForUser(this.prisma, organizationId, user.id);
     if (!hasPermission(user, 'hrm.leave.approve')) {
-      const own = await findEmployeeForUser(this.prisma, organizationId, user.id);
       if (!own) return [];
       if (employeeId && employeeId !== own.id) {
         throw new ForbiddenException('You can only view your own leave requests');
       }
       targetEmployeeId = own.id;
+    } else {
+      const scope = await approverScope(this.prisma, organizationId, user);
+      if (scope) {
+        if (employeeId) {
+          if (employeeId !== own?.id) assertInScope(scope, employeeId);
+        } else {
+          teamIds = own ? [...scope, own.id] : scope;
+        }
+      }
     }
     return this.prisma.leaveRequest.findMany({
       where: {
         organizationId,
         ...(targetEmployeeId && { employeeId: targetEmployeeId }),
+        ...(teamIds && { employeeId: { in: teamIds } }),
         ...(status && { status: status as LeaveRequestStatus }),
       },
       orderBy: { createdAt: 'desc' },
@@ -131,7 +144,8 @@ export class LeaveService {
   // final. With two (org setting), the first moves the request to
   // FIRST_APPROVED and a different person must give the final approval.
   // Days come off the balance only on final approval. Either step can reject.
-  async decide(organizationId: string, approverUserId: string, requestId: string, approve: boolean) {
+  async decide(organizationId: string, user: CallingUser, requestId: string, approve: boolean) {
+    const approverUserId = user.id;
     const request = await this.prisma.leaveRequest.findFirst({
       where: { id: requestId, organizationId },
       include: { leaveType: true, employee: true },
@@ -147,6 +161,7 @@ export class LeaveService {
     if (approver?.id === request.employeeId) {
       throw new ForbiddenException('You cannot approve or reject your own leave request');
     }
+    assertInScope(await approverScope(this.prisma, organizationId, user), request.employeeId);
 
     const settings = await this.prisma.organizationLocaleSettings.findUnique({ where: { organizationId } });
     const needsTwoSteps = (settings?.leaveApprovalSteps ?? 1) >= 2;
@@ -214,6 +229,7 @@ export class LeaveService {
       if (!isOwner && !isApprover) throw new ForbiddenException('You can only cancel your own requests');
     } else if (request.status === LeaveRequestStatus.APPROVED) {
       if (!isApprover) throw new ForbiddenException('Ask your manager or HR to cancel approved leave');
+      assertInScope(await approverScope(this.prisma, organizationId, user), request.employeeId);
     } else {
       throw new BadRequestException(`A ${request.status.toLowerCase()} request cannot be cancelled`);
     }
@@ -271,8 +287,11 @@ export class LeaveService {
     const own = await findEmployeeForUser(this.prisma, organizationId, user.id);
     const targetId = employeeId ?? own?.id;
     if (!targetId) return [];
-    if (targetId !== own?.id && !hasPermission(user, 'hrm.leave.approve')) {
-      throw new ForbiddenException('You can only view your own leave balances');
+    if (targetId !== own?.id) {
+      if (!hasPermission(user, 'hrm.leave.approve')) {
+        throw new ForbiddenException('You can only view your own leave balances');
+      }
+      assertInScope(await approverScope(this.prisma, organizationId, user), targetId);
     }
     const employee = await this.prisma.employee.findFirst({ where: { id: targetId, organizationId } });
     if (!employee) throw new NotFoundException('Employee not found');
@@ -359,9 +378,11 @@ export class LeaveService {
     return todayInTimeZone(settings?.defaultTimezone);
   }
 
-  async setAllocation(organizationId: string, actorUserId: string, dto: any) {
+  async setAllocation(organizationId: string, user: CallingUser, dto: any) {
+    const actorUserId = user.id;
     const employee = await this.prisma.employee.findFirst({ where: { id: dto.employeeId, organizationId } });
     if (!employee) throw new NotFoundException('Employee not found');
+    assertInScope(await approverScope(this.prisma, organizationId, user), employee.id);
     await this.findLeaveType(organizationId, dto.leaveTypeId);
 
     const balance = await this.prisma.leaveBalance.upsert({

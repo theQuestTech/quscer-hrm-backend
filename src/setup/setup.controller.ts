@@ -35,12 +35,6 @@ export class SetupController {
     return this.setupService.updateSettings(req.user.organizationId, dto);
   }
 
-  @Get('dashboard/summary')
-  @RequirePermission('hrm.employee.read')
-  dashboardSummary(@Req() req: any) {
-    return this.setupService.dashboardSummary(req.user.organizationId);
-  }
-
   // --- Branches
   @Get('branches')
   @RequirePermission('hrm.employee.read')

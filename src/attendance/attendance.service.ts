@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AttendanceSource, AttendanceStatus, CorrectionStatus, EmployeeStatus, Prisma } from '@prisma/client';
 import { startOfDayUtc, todayInTimeZone, zonedTime } from '../common/dates';
 import { computeShiftMetrics } from './shift-metrics';
+import { approverScope, assertInScope } from '../common/approver-scope';
 import { findEmployeeForUser, requireEmployeeForUser } from '../common/current-employee';
 import { hasPermission } from '../rbac/rbac.service';
 
@@ -157,7 +158,7 @@ export class AttendanceService {
   // correction always shows who made it.
   async markManual(
     organizationId: string,
-    actorUserId: string,
+    user: { id: string; permissions?: string[] },
     employeeId: string,
     date: string,
     status: AttendanceStatus,
@@ -167,6 +168,8 @@ export class AttendanceService {
       where: { id: employeeId, organizationId },
     });
     if (!employee) throw new NotFoundException('Employee not found');
+    assertInScope(await approverScope(this.prisma, organizationId, user), employeeId);
+    const actorUserId = user.id;
 
     const day = startOfDayUtc(new Date(date));
     const record = await this.prisma.attendanceRecord.upsert({
@@ -191,11 +194,17 @@ export class AttendanceService {
   }
 
   // One row per active employee for a given day, with their record if any —
-  // the manager's attendance register (WBS 5.10 backing data).
-  async register(organizationId: string, date?: string) {
+  // the attendance register (WBS 5.10 backing data). A manager only sees
+  // their team.
+  async register(organizationId: string, user: { id: string; permissions?: string[] }, date?: string) {
     const day = date ? startOfDayUtc(new Date(date)) : await this.todayFor(organizationId);
+    const scope = await approverScope(this.prisma, organizationId, user);
     const employees = await this.prisma.employee.findMany({
-      where: { organizationId, status: { in: [EmployeeStatus.ACTIVE, EmployeeStatus.ON_LEAVE] } },
+      where: {
+        organizationId,
+        status: { in: [EmployeeStatus.ACTIVE, EmployeeStatus.ON_LEAVE] },
+        ...(scope && { id: { in: scope } }),
+      },
       orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
       select: {
         id: true, employeeNumber: true, firstName: true, lastName: true, designation: true,
@@ -225,8 +234,11 @@ export class AttendanceService {
     if (!targetId) {
       throw new BadRequestException('No employee record is linked to this user account');
     }
-    if (targetId !== own?.id && !hasPermission(user, 'hrm.attendance.approve')) {
-      throw new ForbiddenException('You can only view your own attendance');
+    if (targetId !== own?.id) {
+      if (!hasPermission(user, 'hrm.attendance.approve')) {
+        throw new ForbiddenException('You can only view your own attendance');
+      }
+      assertInScope(await approverScope(this.prisma, organizationId, user), targetId);
     }
 
     return this.prisma.attendanceRecord.findMany({
@@ -302,10 +314,14 @@ export class AttendanceService {
       organizationId,
       ...(status && { status: status as CorrectionStatus }),
     };
+    const own = await findEmployeeForUser(this.prisma, organizationId, user.id);
     if (!hasPermission(user, 'hrm.attendance.approve')) {
-      const own = await findEmployeeForUser(this.prisma, organizationId, user.id);
       if (!own) return [];
       where.employeeId = own.id;
+    } else {
+      // A manager sees their team's and their own.
+      const scope = await approverScope(this.prisma, organizationId, user);
+      if (scope) where.employeeId = { in: own ? [...scope, own.id] : scope };
     }
     return this.prisma.attendanceCorrection.findMany({
       where,
@@ -314,7 +330,13 @@ export class AttendanceService {
     });
   }
 
-  async decideCorrection(organizationId: string, actorUserId: string, id: string, approve: boolean) {
+  async decideCorrection(
+    organizationId: string,
+    user: { id: string; permissions?: string[] },
+    id: string,
+    approve: boolean,
+  ) {
+    const actorUserId = user.id;
     const correction = await this.prisma.attendanceCorrection.findFirst({
       where: { id, organizationId },
       include: { employee: { include: { branch: true, shift: true } } },
@@ -326,6 +348,7 @@ export class AttendanceService {
     if (correction.employee.userId === actorUserId || correction.requestedByUserId === actorUserId) {
       throw new ForbiddenException('You cannot decide your own correction');
     }
+    assertInScope(await approverScope(this.prisma, organizationId, user), correction.employeeId);
 
     return this.prisma.$transaction(async (tx) => {
       const decided = await tx.attendanceCorrection.update({
