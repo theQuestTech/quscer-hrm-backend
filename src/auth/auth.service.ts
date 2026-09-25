@@ -5,6 +5,7 @@
 // Quscer session validation, not hardened into a real auth system.
 
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   InternalServerErrorException,
@@ -16,6 +17,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RbacService } from '../rbac/rbac.service';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { findEmployeeForUser } from '../common/current-employee';
 
 const SALT_ROUNDS = 10;
@@ -146,30 +148,3 @@ export class AuthService {
         firstName: user.firstName,
         lastName: user.lastName,
       },
-      organization: {
-        id: user.organization.id,
-        name: user.organization.name,
-        currency: user.organization.localeSettings?.defaultCurrency ?? 'PKR',
-        timezone: user.organization.localeSettings?.defaultTimezone ?? 'Asia/Karachi',
-      },
-      roles: user.roleAssignments.map((a) => a.role.name),
-      permissions: [...permissions].sort(),
-      employee: employee && {
-        id: employee.id,
-        employeeNumber: employee.employeeNumber,
-        firstName: employee.firstName,
-        lastName: employee.lastName,
-        designation: employee.designation,
-      },
-    };
-  }
-
-  private async issueToken(userId: string, organizationId: string, email: string) {
-    const accessToken = await this.jwtService.signAsync({
-      id: userId,
-      organizationId,
-      email,
-    });
-    return { accessToken };
-  }
-}
