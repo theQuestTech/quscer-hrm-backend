@@ -126,35 +126,25 @@ export class UsersService {
     return { employeeId, userId };
   }
 
+  // "Forgot my password" until email-based reset exists: HR sets a new
+  // temporary password and shares it. Your own password goes through
+  // POST /auth/change-password instead, which checks the current one.
+  async resetPassword(organizationId: string, actorUserId: string, userId: string, newPassword: string) {
+    await this.findUser(organizationId, userId);
+    if (userId === actorUserId) {
+      throw new BadRequestException('Use "Change password" for your own account');
+    }
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: await bcrypt.hash(newPassword, SALT_ROUNDS) },
+    });
+    await this.audit(organizationId, actorUserId, 'user.password_reset', userId, {});
+    return { reset: true };
+  }
+
   private async employeeRoleId(organizationId: string) {
     const role = await this.prisma.role.findFirst({
       where: { organizationId, name: 'Employee', isSystemRole: true },
     });
     if (!role) throw new BadRequestException('No "Employee" role exists in this organization');
     return role.id;
-  }
-
-  private async findUser(organizationId: string, userId: string) {
-    const user = await this.prisma.user.findFirst({ where: { id: userId, organizationId } });
-    if (!user) throw new NotFoundException('User not found');
-    return user;
-  }
-
-  private async assertRolesInOrg(organizationId: string, roleIds: string[]) {
-    const count = await this.prisma.role.count({ where: { organizationId, id: { in: roleIds } } });
-    if (count !== roleIds.length) throw new BadRequestException('One or more roles were not found');
-  }
-
-  private audit(organizationId: string, actorUserId: string, eventType: string, entityId: string, metadata: any) {
-    return this.prisma.auditEvent.create({
-      data: {
-        organizationId,
-        actorUserId,
-        eventType,
-        entityType: eventType.startsWith('employee') ? 'Employee' : 'User',
-        entityId,
-        metadata,
-      },
-    });
-  }
-}
