@@ -10,5 +10,6 @@ import { MeController } from './me.controller';
   imports: [AuthModule, RbacModule],
   controllers: [EmployeesController, PhotoController, MeController],
   providers: [EmployeesService],
+  exports: [EmployeesService],
 })
 export class EmployeesModule {}

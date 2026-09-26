@@ -37,6 +37,11 @@ export class UpdateOrganizationSettingsDto {
   // Performance: "RATING" (1–5), "TARGET" (actual vs target) or "BOTH".
   @IsOptional() @IsIn(['RATING', 'TARGET', 'BOTH']) kpiScoring?: string;
   @IsOptional() @IsBoolean() selfReviewEnabled?: boolean;
+  // Recruitment: the careers page address, /careers/<careersSlug>.
+  @IsOptional() @IsString() @Matches(/^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/, {
+    message: 'Use 3–40 lowercase letters, numbers and dashes',
+  })
+  careersSlug?: string;
 }
 
 export class CreateBranchDto {

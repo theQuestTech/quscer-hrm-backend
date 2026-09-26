@@ -22,6 +22,8 @@ model Organization {
   id          String   @id @default(cuid())
   name        String
   quscerOrgId String?  @unique // set once linked to Quscer OS (task 6.1) — null until then
+  // Public careers page address: /careers/<careersSlug>. Set on first use.
+  careersSlug String?  @unique
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -500,6 +502,7 @@ model Employee {
   finalSettlement       FinalSettlement?
   birthdayPosts         FeedPost[]
   performanceReviews    PerformanceReview[]      @relation("ReviewEmployee")
+  onboardingTasks       OnboardingTask[]
   photo                 EmployeePhoto?
 
   @@unique([organizationId, employeeNumber])
@@ -953,4 +956,172 @@ model ReviewKpi {
   review PerformanceReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
 
   @@index([reviewId])
+}
+
+// --- Recruitment ------------------------------------------------------------
+// A job opening is posted on the company's public careers page while OPEN.
+// People apply there (or HR adds them), move through the stages, get
+// interviewed, get an offer, and "Hire" turns them into an employee.
+
+enum JobStatus {
+  DRAFT
+  OPEN
+  CLOSED
+}
+
+enum ApplicationStage {
+  APPLIED
+  SCREENING
+  INTERVIEW
+  OFFER
+  HIRED
+  REJECTED
+}
+
+enum OfferStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  DECLINED
+}
+
+enum InterviewStatus {
+  SCHEDULED
+  DONE
+  CANCELLED
+}
+
+model JobOpening {
+  id                      String          @id @default(cuid())
+  organizationId          String
+  title                   String
+  departmentId            String?
+  branchId                String?
+  employmentType          EmploymentType?
+  location                String?
+  description             String
+  requirements            String?
+  salaryRange             String? // shown on the careers page as written, e.g. "PKR 80,000 – 100,000"
+  openings                Int             @default(1)
+  closesAt                DateTime?
+  status                  JobStatus       @default(DRAFT)
+  // Can see this job's candidates and give feedback.
+  hiringManagerEmployeeId String?
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+
+  applications JobApplication[]
+
+  @@index([organizationId, status])
+}
+
+model JobApplication {
+  id               String           @id @default(cuid())
+  organizationId   String
+  jobId            String
+  firstName        String
+  lastName         String
+  email            String
+  phone            String
+  city             String?
+  currentCompany   String?
+  expectedSalary   Int?
+  noticePeriodDays Int?
+  coverNote        String?
+  source           String           @default("CAREERS_PAGE") // CAREERS_PAGE, REFERRAL, JOB_BOARD, WALK_IN, OTHER
+  stage            ApplicationStage @default(APPLIED)
+  rejectReason     String?
+  notes            String? // HR's private notes
+  cvFileName       String?
+  cvMimeType       String?
+  cvSizeBytes      Int?
+  offerDesignation String?
+  offerSalary      Int?
+  offerJoiningDate DateTime?
+  offerNotes       String?
+  offerStatus      OfferStatus?
+  offerSentAt      DateTime?
+  hiredEmployeeId  String?          @unique
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  job        JobOpening          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  cv         JobApplicationFile?
+  interviews Interview[]
+
+  @@unique([jobId, email])
+  @@index([organizationId, stage])
+}
+
+// The CV, kept apart so lists never load file contents.
+model JobApplicationFile {
+  applicationId String @id
+  data          Bytes
+
+  application JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
+
+model Interview {
+  id                    String          @id @default(cuid())
+  applicationId         String
+  scheduledAt           DateTime
+  durationMinutes       Int             @default(30)
+  mode                  String          @default("IN_PERSON") // IN_PERSON, PHONE, VIDEO
+  location              String? // address or meeting link
+  interviewerEmployeeId String?
+  status                InterviewStatus @default(SCHEDULED)
+  rating                Int? // 1–5
+  recommendation        String? // HIRE, MAYBE, NO_HIRE
+  feedback              String?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  application JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@index([interviewerEmployeeId, status])
+}
+
+// --- Onboarding -------------------------------------------------------------
+// The company's joining checklist (templates) is copied onto each new
+// joiner. Each task belongs to HR, the new joiner's manager, or the new
+// joiner, and is due a number of days after (or, if negative, before) the
+// joining date.
+
+enum OnboardingAssignee {
+  HR
+  MANAGER
+  EMPLOYEE
+}
+
+model OnboardingTaskTemplate {
+  id             String             @id @default(cuid())
+  organizationId String
+  title          String
+  description    String?
+  assignee       OnboardingAssignee
+  dueDays        Int                @default(0)
+  isActive       Boolean            @default(true)
+  createdAt      DateTime           @default(now())
+
+  @@index([organizationId])
+}
+
+model OnboardingTask {
+  id             String             @id @default(cuid())
+  organizationId String
+  employeeId     String
+  title          String
+  description    String?
+  assignee       OnboardingAssignee
+  dueDate        DateTime
+  position       Int                @default(0)
+  doneAt         DateTime?
+  doneByUserId   String?
+  createdAt      DateTime           @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, doneAt])
+  @@index([employeeId])
 }

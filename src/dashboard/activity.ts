@@ -39,6 +39,21 @@ const PHRASES: Record<string, string> = {
   'performance.goals_shared': 'shared performance goals',
   'performance.self_submitted': 'submitted a self-review',
   'performance.review_completed': 'completed a performance review',
+  'recruitment.job_created': 'created a job opening',
+  'recruitment.job_open': 'published a job on the careers page',
+  'recruitment.job_closed': 'closed a job opening',
+  'recruitment.applied': 'applied for a job',
+  'recruitment.candidate_added': 'added a candidate',
+  'recruitment.stage_changed': 'moved a candidate',
+  'recruitment.interview_scheduled': 'scheduled an interview',
+  'recruitment.feedback_given': 'gave interview feedback',
+  'recruitment.offer_saved': 'prepared a job offer',
+  'recruitment.offer_sent': 'sent a job offer',
+  'recruitment.offer_accepted': 'recorded an accepted offer',
+  'recruitment.offer_declined': 'recorded a declined offer',
+  'recruitment.hired': 'hired a new employee',
+  'onboarding.started': 'started onboarding for a new joiner',
+  'onboarding.completed': 'finished an onboarding checklist',
 };
 
 export function activityPhrase(eventType: string): string {
@@ -51,6 +66,6 @@ export function activityKind(eventType: string): 'leave' | 'attendance' | 'payro
   if (eventType.startsWith('attendance.')) return 'attendance';
   if (eventType.startsWith('payroll.') || eventType.startsWith('settlement.')) return 'payroll';
   if (eventType.includes('document')) return 'document';
-  if (eventType.startsWith('employee.') || eventType.startsWith('user.') || eventType.startsWith('performance.')) return 'people';
+  if (eventType.startsWith('employee.') || eventType.startsWith('user.') || eventType.startsWith('performance.') || eventType.startsWith('recruitment.') || eventType.startsWith('onboarding.')) return 'people';
   return 'other';
 }
