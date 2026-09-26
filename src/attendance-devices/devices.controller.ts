@@ -76,6 +76,15 @@ export class DevicesController {
     return this.devices.removeNetwork(req.user, id);
   }
 
+  // Where machines connect: the plain-HTTP address for older machines, if
+  // the server has one (MACHINE_PUBLIC_ADDRESS, e.g. "x.proxy.rlwy.net:12345").
+  @Get('connection-info')
+  connectionInfo() {
+    const plain = process.env.MACHINE_PUBLIC_ADDRESS?.trim();
+    const [host, port] = plain ? plain.replace(/^https?:\/\//, '').split(':') : [];
+    return { plainHttp: plain ? { host, port: port ? Number(port) : 80 } : null };
+  }
+
   // "Use my current network": the internet address this request came from.
   @Get('my-ip')
   myIp(@Req() req: Request) {
