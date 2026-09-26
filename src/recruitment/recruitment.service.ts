@@ -570,7 +570,7 @@ export class RecruitmentService {
 
   private async publicOrg(slug: string) {
     const org = await this.prisma.organization.findUnique({ where: { careersSlug: slug.toLowerCase() } });
-    if (!org || !(await this.moduleOn(org.id))) throw new NotFoundException('Careers page not found');
+    if (!org || org.suspendedAt || !(await this.moduleOn(org.id))) throw new NotFoundException('Careers page not found');
     return org;
   }
 

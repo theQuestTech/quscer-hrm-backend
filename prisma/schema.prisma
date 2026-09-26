@@ -19,13 +19,17 @@ datasource db {
 // 1.3 — Tenancy
 // ----------------------------------------------------------------------------
 model Organization {
-  id          String   @id @default(cuid())
-  name        String
-  quscerOrgId String?  @unique // set once linked to Quscer OS (task 6.1) — null until then
+  id              String    @id @default(cuid())
+  name            String
+  quscerOrgId     String?   @unique // set once linked to Quscer OS (task 6.1) — null until then
   // Public careers page address: /careers/<careersSlug>. Set on first use.
-  careersSlug String?  @unique
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  careersSlug     String?   @unique
+  // Switched off by Quscer support: nobody can sign in, no emails go out
+  // and the careers page is hidden. Data is kept.
+  suspendedAt     DateTime?
+  suspendedReason String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   users          User[]
   memberships    Membership[]
@@ -35,6 +39,8 @@ model Organization {
   employees      Employee[]
   localeSettings OrganizationLocaleSettings?
   holidays       Holiday[]
+  supportTickets SupportTicket[]
+  supportActions SupportAction[]
 
   @@index([quscerOrgId])
 }
@@ -44,19 +50,24 @@ model Organization {
 // companies they can open is Membership — e.g. an outsourced HR person
 // working for several client companies.
 model User {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   organizationId String
-  quscerUserId   String?  @unique // set once linked to Quscer OS (task 6.1) — null until then
+  quscerUserId   String?   @unique // set once linked to Quscer OS (task 6.1) — null until then
   email          String
   passwordHash   String? // null once auth is delegated to Quscer OS SSO
   firstName      String
   lastName       String
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  isActive       Boolean   @default(true)
+  // Last sign-in or app open (updated at most every few minutes).
+  lastSeenAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   organization    Organization         @relation(fields: [organizationId], references: [id])
   roleAssignments UserRoleAssignment[]
+  supportTickets  SupportTicket[]
+  supportMessages SupportMessage[]
+  supportViews    SupportViewSession[]
   memberships     Membership[]
   feedPosts       FeedPost[]
   feedComments    FeedComment[]
@@ -1373,4 +1384,143 @@ model ReminderLog {
   id        String   @id @default(cuid())
   key       String   @unique // e.g. "doc-expiry-30:<documentId>:<expiryDate>"
   createdAt DateTime @default(now())
+}
+
+// --- Quscer support console ---------------------------------------------------
+// Quscer's own support team. Completely separate from customer logins: a
+// customer account can never open the console, and a support account can
+// never sign in to a company except through a recorded read-only view.
+
+model SupportAgent {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String? // null until they choose one from the emailed link
+  isOwner      Boolean   @default(false) // can add and remove support staff
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+
+  tokens   SupportAgentToken[]
+  actions  SupportAction[]
+  messages SupportMessage[]
+  views    SupportViewSession[]
+}
+
+// "Choose your password" links for support staff. Only the hash is stored.
+model SupportAgentToken {
+  id        String    @id @default(cuid())
+  agentId   String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  agent SupportAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+}
+
+enum SupportTicketStatus {
+  OPEN // waiting for Quscer
+  ANSWERED // waiting for the customer
+  CLOSED
+}
+
+// A customer's help request ("Get help" in HRM).
+model SupportTicket {
+  id             String              @id @default(cuid())
+  organizationId String
+  userId         String
+  subject        String
+  status         SupportTicketStatus @default(OPEN)
+  page           String? // the HRM page they were on when they asked
+  lastMessageAt  DateTime            @default(now())
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  organization Organization     @relation(fields: [organizationId], references: [id])
+  user         User             @relation(fields: [userId], references: [id])
+  messages     SupportMessage[]
+
+  @@index([status, lastMessageAt])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+model SupportMessage {
+  id        String   @id @default(cuid())
+  ticketId  String
+  body      String
+  userId    String? // written by the customer…
+  agentId   String? // …or by Quscer support
+  createdAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user   User?         @relation(fields: [userId], references: [id])
+  agent  SupportAgent? @relation(fields: [agentId], references: [id])
+
+  @@index([ticketId, createdAt])
+}
+
+// "View as a user": a read-only, time-limited look at HRM as a customer
+// sees it. Every one is recorded, with the reason.
+model SupportViewSession {
+  id             String    @id @default(cuid())
+  agentId        String
+  userId         String
+  organizationId String
+  reason         String
+  startedAt      DateTime  @default(now())
+  expiresAt      DateTime
+  endedAt        DateTime?
+
+  agent SupportAgent @relation(fields: [agentId], references: [id])
+  user  User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId, startedAt])
+}
+
+// Everything support staff do, for the console's activity log.
+model SupportAction {
+  id             String   @id @default(cuid())
+  agentId        String
+  action         String // "company.suspended", "user.reset_link_sent", …
+  organizationId String?
+  userId         String?
+  detail         Json     @default("{}")
+  createdAt      DateTime @default(now())
+
+  agent        SupportAgent  @relation(fields: [agentId], references: [id])
+  organization Organization? @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([createdAt])
+}
+
+enum EmailStatus {
+  SENT // accepted by Resend
+  FAILED // Resend refused it, or couldn't be reached
+  DELIVERED // reached the inbox (reported by Resend's webhook)
+  BOUNCED // the receiving server refused it
+  COMPLAINED // marked as spam
+}
+
+// Every email HRM sends — who to, what kind and what happened. Not the
+// content. Kept for 90 days.
+model EmailLog {
+  id             String      @id @default(cuid())
+  organizationId String?
+  to             String
+  kind           String // "welcome", "leave_requested", "password_reset", …
+  subject        String
+  status         EmailStatus
+  error          String?
+  providerId     String?     @unique // Resend's email id
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([organizationId, createdAt])
+  @@index([createdAt])
+  @@index([to])
 }

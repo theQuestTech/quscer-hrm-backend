@@ -29,10 +29,12 @@ export class NotifyService {
 
   // --- Plumbing ---------------------------------------------------------------
 
-  private async enabled(organizationId: string) {
+  // `force`: Quscer support sending on purpose, even if the company has
+  // switched notifications off.
+  private async enabled(organizationId: string, force = false) {
     if (!this.mailer.enabled) return null;
     const org = await this.prisma.organization.findUnique({ where: { id: organizationId }, include: { localeSettings: true } });
-    if (!org || org.localeSettings?.emailNotificationsEnabled === false) return null;
+    if (!org || org.suspendedAt || (!force && org.localeSettings?.emailNotificationsEnabled === false)) return null;
     return { name: org.name, timeZone: org.localeSettings?.defaultTimezone ?? 'Asia/Karachi' };
   }
 
@@ -41,8 +43,8 @@ export class NotifyService {
     setImmediate(() => task().catch((e) => this.log.error(`Notification failed: ${e instanceof Error ? e.message : e}`)));
   }
 
-  async sendTo(organizationId: string, people: Person[], build: (p: Person) => EmailContent) {
-    const org = await this.enabled(organizationId);
+  async sendTo(organizationId: string, kind: string, people: Person[], build: (p: Person) => EmailContent, force = false) {
+    const org = await this.enabled(organizationId, force);
     if (!org) return 0;
     const seen = new Set<string>();
     let sent = 0;
@@ -51,7 +53,7 @@ export class NotifyService {
       if (seen.has(key)) continue;
       seen.add(key);
       const email = renderEmail(build(p), org.name);
-      if (await this.mailer.send({ to: p.email, ...email })) sent++;
+      if (await this.mailer.send({ to: p.email, ...email }, { organizationId, kind })) sent++;
     }
     return sent;
   }
@@ -95,7 +97,7 @@ export class NotifyService {
       const manager = r.employee.managerId ? await this.loginOf(organizationId, r.employee.managerId) : null;
       const to = manager ? [manager] : await this.hrPeople(organizationId);
       const name = `${r.employee.firstName} ${r.employee.lastName}`;
-      await this.sendTo(organizationId, to, (p) => ({
+      await this.sendTo(organizationId, 'leave_requested', to, (p) => ({
         subject: `${name} asked for ${r.leaveType.name.toLowerCase()} leave`,
         title: 'A leave request needs your decision',
         lines: [
@@ -117,7 +119,7 @@ export class NotifyService {
       const when = `${fmtDate(r.startDate)}${r.days > 1 ? ` to ${fmtDate(r.endDate)}` : ''}`;
       if (outcome === 'FIRST_APPROVED') {
         const name = `${r.employee.firstName} ${r.employee.lastName}`;
-        await this.sendTo(organizationId, await this.hrPeople(organizationId, actorUserId), (p) => ({
+        await this.sendTo(organizationId, 'leave_first_approved', await this.hrPeople(organizationId, actorUserId), (p) => ({
           subject: `Final approval needed: ${name}'s leave`,
           title: 'A leave request needs the final approval',
           lines: [`Hi ${p.firstName}, ${name}'s ${r.leaveType.name.toLowerCase()} leave (${when}) has its first approval and now needs a second person to approve it.`],
@@ -128,7 +130,7 @@ export class NotifyService {
       const me = await this.loginOf(organizationId, r.employee.id);
       if (!me) return;
       const approved = outcome === 'APPROVED';
-      await this.sendTo(organizationId, [me], (p) => ({
+      await this.sendTo(organizationId, 'leave_decided', [me], (p) => ({
         subject: approved ? 'Your leave was approved' : 'Your leave request was not approved',
         title: approved ? 'Your leave was approved ✓' : 'Your leave request was not approved',
         lines: [`Hi ${p.firstName}, your ${r.leaveType.name.toLowerCase()} leave for ${when} (${r.days} day${r.days === 1 ? '' : 's'}) was ${approved ? 'approved' : 'not approved'}.`],
@@ -150,7 +152,7 @@ export class NotifyService {
         if (p) people.push(p);
       }
       const month = run.periodStart.toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-      await this.sendTo(organizationId, people, (p) => ({
+      await this.sendTo(organizationId, 'payslip_ready', people, (p) => ({
         subject: `Your payslip for ${month} is ready`,
         title: `Your ${month} payslip is ready`,
         lines: [`Hi ${p.firstName}, your payslip for ${month} is ready to view and download.`, `For your privacy, amounts aren't included in this email.`],
@@ -172,7 +174,7 @@ export class NotifyService {
         const p = await this.loginOf(organizationId, id);
         if (p) people.push(p);
       }
-      await this.sendTo(organizationId, people, (p) => ({
+      await this.sendTo(organizationId, 'training_booked', people, (p) => ({
         subject: `You're booked on ${s.course.title}`,
         title: `You're booked on ${s.course.title}`,
         lines: [
@@ -197,7 +199,7 @@ export class NotifyService {
         const hm = await this.loginOf(organizationId, a.job.hiringManagerEmployeeId);
         if (hm) to.push(hm);
       }
-      await this.sendTo(organizationId, to, (p) => ({
+      await this.sendTo(organizationId, 'candidate_applied', to, (p) => ({
         subject: `New application: ${a.job.title}`,
         title: `${a.firstName} ${a.lastName} applied for ${a.job.title}`,
         lines: [`Hi ${p.firstName}, a new application came in through your careers page${a.city ? ` from ${a.city}` : ''}.`],
@@ -212,23 +214,26 @@ export class NotifyService {
   // HR never has to share one. Someone who already had a login (another
   // company) is just told they've been added.
   welcome(organizationId: string, userId: string, isNewLogin: boolean) {
-    this.later(async () => {
-      const user = await this.prisma.user.findUnique({ where: { id: userId } });
-      const org = await this.enabled(organizationId);
-      if (!user || !org) return;
-      const link = isNewLogin ? await this.passwordReset.setPasswordLink(user.id, 7 * 24 * 60) : `${appUrl()}/login`;
-      await this.sendTo(organizationId, [{ email: user.email, firstName: user.firstName }], (p) => ({
-        subject: `Welcome to ${org.name} on Quscer People`,
-        title: `Welcome to ${org.name}`,
-        lines: isNewLogin
-          ? [
-              `Hi ${p.firstName}, ${org.name} has set you up on Quscer People — where you check in, ask for leave, see your payslips and more.`,
-              `Choose your own password with the button below. The link works once and expires in 7 days. (If HR already gave you a starting password, that works too.)`,
-              `Your sign-in email is ${user.email}.`,
-            ]
-          : [`Hi ${p.firstName}, you now also have access to ${org.name} on Quscer People. Sign in with your usual email and password, then switch to ${org.name} from the account menu.`],
-        button: { label: isNewLogin ? 'Choose my password' : 'Sign in', url: link },
-      }));
-    });
+    this.later(() => this.welcomeNow(organizationId, userId, isNewLogin));
+  }
+
+  // Returns whether it was sent. Support resends it with `force`.
+  async welcomeNow(organizationId: string, userId: string, isNewLogin: boolean, force = false): Promise<boolean> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const org = await this.enabled(organizationId, force);
+    if (!user || !org) return false;
+    const link = isNewLogin ? await this.passwordReset.setPasswordLink(user.id, 7 * 24 * 60) : `${appUrl()}/login`;
+    return (await this.sendTo(organizationId, 'welcome', [{ email: user.email, firstName: user.firstName }], (p) => ({
+      subject: `Welcome to ${org.name} on Quscer People`,
+      title: `Welcome to ${org.name}`,
+      lines: isNewLogin
+        ? [
+            `Hi ${p.firstName}, ${org.name} has set you up on Quscer People — where you check in, ask for leave, see your payslips and more.`,
+            `Choose your own password with the button below. The link works once and expires in 7 days. (If HR already gave you a starting password, that works too.)`,
+            `Your sign-in email is ${user.email}.`,
+          ]
+        : [`Hi ${p.firstName}, you now also have access to ${org.name} on Quscer People. Sign in with your usual email and password, then switch to ${org.name} from the account menu.`],
+      button: { label: isNewLogin ? 'Choose my password' : 'Sign in', url: link },
+    }), force)) > 0;
   }
 }

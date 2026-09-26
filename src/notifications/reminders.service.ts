@@ -88,7 +88,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
     for (const i of items) {
       const me = await this.notify.loginOf(organizationId, i.employeeId);
       if (!me) continue;
-      await this.notify.sendTo(organizationId, [me], (p) => ({
+      await this.notify.sendTo(organizationId, 'expiry_reminder', [me], (p) => ({
         subject: `Your ${i.what} expires on ${fmtDate(i.expires)}`,
         title: `Your ${i.what} expires soon`,
         lines: [`Hi ${p.firstName}, your ${i.what} expires on ${fmtDate(i.expires)}. Please arrange a renewal and give HR the new one.`],
@@ -96,7 +96,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
       }));
     }
     const hr = await this.notify.hrPeople(organizationId);
-    await this.notify.sendTo(organizationId, hr, (p) => ({
+    await this.notify.sendTo(organizationId, 'expiry_summary', hr, (p) => ({
       subject: `${items.length} document${items.length === 1 ? '' : 's'} or certificate${items.length === 1 ? '' : 's'} expiring soon`,
       title: 'Expiring in the next 30 days',
       lines: [`Hi ${p.firstName}, these expire soon:`, ...items.sort((a, b) => a.expires.getTime() - b.expires.getTime()).map((i) => `• ${i.name} — ${i.what}, ${fmtDate(i.expires)}`)],
