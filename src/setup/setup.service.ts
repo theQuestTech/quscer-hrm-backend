@@ -65,11 +65,16 @@ export class SetupService {
   }
 
   async updateSettings(organizationId: string, dto: UpdateOrganizationSettingsDto) {
-    const { name, ...locale } = dto;
+    const { name, careersSlug, ...locale } = dto;
     if (locale.defaultTimezone) assertTimeZone(locale.defaultTimezone);
 
-    if (name) {
-      await this.prisma.organization.update({ where: { id: organizationId }, data: { name } });
+    if (name || careersSlug) {
+      try {
+        await this.prisma.organization.update({ where: { id: organizationId }, data: { name, careersSlug } });
+      } catch (e: any) {
+        if (e?.code === 'P2002') throw new ConflictException('That careers page address is taken — try another');
+        throw e;
+      }
     }
     if (Object.keys(locale).length > 0) {
       await this.prisma.organizationLocaleSettings.upsert({

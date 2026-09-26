@@ -150,6 +150,17 @@ export class AuthService {
 
     const permissions = await this.rbacService.getEffectivePermissions(userId, organizationId);
     const employee = await findEmployeeForUser(this.prisma, organizationId, userId);
+    // Show Recruitment to hiring managers and interviewers, and Onboarding
+    // to new joiners and their managers, even if they aren't HR.
+    const [hiringOrInterviewing, onboardingTasks] = employee
+      ? await Promise.all([
+          this.prisma.jobOpening.count({ where: { organizationId, hiringManagerEmployeeId: employee.id, status: { not: 'DRAFT' } } })
+            .then(async (n) => n + (await this.prisma.interview.count({ where: { interviewerEmployeeId: employee.id, status: { not: 'CANCELLED' } } }))),
+          this.prisma.onboardingTask.count({
+            where: { organizationId, OR: [{ employeeId: employee.id }, { employee: { managerId: employee.id } }] },
+          }),
+        ])
+      : [0, 0];
 
     return {
       user: {
@@ -166,6 +177,7 @@ export class AuthService {
         modules: organization.localeSettings?.enabledModules ?? ['performance', 'training', 'recruitment'],
         kpiScoring: organization.localeSettings?.kpiScoring ?? 'BOTH',
       },
+      involvement: { recruiting: hiringOrInterviewing > 0, onboarding: onboardingTasks > 0 },
       companies: await this.companies(userId),
       roles: user.roleAssignments.map((a) => a.role.name),
       permissions: [...permissions].sort(),

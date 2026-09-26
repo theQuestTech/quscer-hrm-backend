@@ -328,7 +328,7 @@ export class DashboardService {
       const actor = actors.find((a) => a.id === e.actorUserId);
       lines.push({
         kind: activityKind(e.eventType),
-        text: `${actor ? `${actor.firstName} ${actor.lastName}` : 'Someone'} ${activityPhrase(e.eventType)}`,
+        text: `${actor ? `${actor.firstName} ${actor.lastName}` : e.eventType === 'recruitment.applied' ? 'A candidate' : 'Someone'} ${activityPhrase(e.eventType)}`,
         at: e.createdAt,
         key,
         count: 1,

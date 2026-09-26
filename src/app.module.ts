@@ -14,6 +14,8 @@ import { UsersModule } from './users/users.module';
 import { FeedModule } from './feed/feed.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { PerformanceModule } from './performance/performance.module';
+import { OnboardingModule } from './onboarding/onboarding.module';
+import { RecruitmentModule } from './recruitment/recruitment.module';
 
 @Module({
   imports: [
@@ -32,6 +34,8 @@ import { PerformanceModule } from './performance/performance.module';
     FeedModule,
     DashboardModule,
     PerformanceModule,
+    OnboardingModule,
+    RecruitmentModule,
   ],
 })
 export class AppModule {}
