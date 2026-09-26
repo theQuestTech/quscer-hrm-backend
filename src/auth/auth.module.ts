@@ -5,6 +5,8 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { RbacModule } from '../rbac/rbac.module';
+import { Mailer } from './mailer';
+import { PasswordResetService } from './password-reset';
 
 @Module({
   imports: [
@@ -19,7 +21,7 @@ import { RbacModule } from '../rbac/rbac.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [JwtAuthGuard, AuthService],
+  providers: [JwtAuthGuard, AuthService, Mailer, PasswordResetService],
   exports: [JwtModule, JwtAuthGuard],
 })
 export class AuthModule {}

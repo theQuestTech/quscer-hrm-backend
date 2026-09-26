@@ -12,6 +12,7 @@ import {
   AddCandidateDto, ApplyDto, FeedbackDto, HireDto, InterviewDto, JobDto, MoveDto, NotesDto, OfferDto, OfferStatusDto,
 } from './recruitment.dto';
 import { MAX_CV_BYTES, RateLimiter } from './recruitment-rules';
+import { visitorAddress } from '../common/visitor-address';
 
 class UpdateJobDto extends PartialType(JobDto) {}
 class UpdateInterviewDto extends PartialType(InterviewDto) {
@@ -145,14 +146,6 @@ export class RecruitmentController {
 // per company so a script can't flood anyone with applications.
 const perVisitor = new RateLimiter(5, 10 * 60 * 1000);
 const perCompany = new RateLimiter(300, 60 * 60 * 1000);
-
-// Behind Railway's proxy the visitor's address is the last one added to
-// X-Forwarded-For (earlier entries can be made up by the visitor).
-function visitorAddress(req: Request): string {
-  const forwarded = req.headers['x-forwarded-for'];
-  const list = (Array.isArray(forwarded) ? forwarded.join(',') : forwarded ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-  return list[list.length - 1] ?? req.socket.remoteAddress ?? 'unknown';
-}
 
 @Controller('careers')
 export class CareersController {
