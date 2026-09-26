@@ -17,12 +17,16 @@ import {
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { AddPersonDto, GrantLoginAccessDto } from './users.dto';
+import { NotifyService } from '../notifications/notify.service';
 
 const SALT_ROUNDS = 10;
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notify: NotifyService,
+  ) {}
 
   listRoles(organizationId: string) {
     return this.prisma.role.findMany({
@@ -109,6 +113,7 @@ export class UsersService {
       roleIds: dto.roleIds,
       existingLogin: !!existing,
     });
+    this.notify.welcome(organizationId, userId, !existing);
     return { userId, existingLogin: !!existing };
   }
 
@@ -214,6 +219,10 @@ export class UsersService {
 
     await this.prisma.employee.update({ where: { id: employeeId }, data: { userId } });
     await this.audit(organizationId, actorUserId, 'employee.login_granted', employeeId, { userId, linkedExistingLogin });
+    // A brand-new login is welcomed; an existing one linked from another
+    // company is told they've been added. Linking a login already in this
+    // company (dto.userId) needs no email.
+    if (!dto.userId) this.notify.welcome(organizationId, userId, !linkedExistingLogin);
     return { employeeId, userId, linkedExistingLogin };
   }
 

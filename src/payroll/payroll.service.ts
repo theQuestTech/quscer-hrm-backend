@@ -14,6 +14,7 @@ import { FieldEncryptionService } from '../crypto/field-encryption.service';
 import { createHash } from 'crypto';
 import { loadWorkCalendar } from '../common/work-calendar';
 import { requireEmployeeForUser } from '../common/current-employee';
+import { NotifyService } from '../notifications/notify.service';
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -23,6 +24,7 @@ export class PayrollService {
     private prisma: PrismaService,
     private statutoryEngine: StatutoryEngineService,
     private fieldEncryption: FieldEncryptionService,
+    private notify: NotifyService,
   ) {}
 
   // ---------------------------------------------------------------------
@@ -398,6 +400,7 @@ export class PayrollService {
       },
     });
     await this.audit(organizationId, approverUserId, 'payroll.approved', runId);
+    this.notify.payslipsReady(organizationId, runId);
     return approved;
   }
 

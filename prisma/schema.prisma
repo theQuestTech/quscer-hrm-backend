@@ -206,28 +206,38 @@ model CostCentre {
 // 1.17 — Jurisdiction & multi-currency org settings
 // ----------------------------------------------------------------------------
 model OrganizationLocaleSettings {
-  organizationId       String   @id
-  defaultCountryCode   String // ISO 3166-1 alpha-2, e.g. "PK"
-  defaultCurrency      String // ISO 4217, e.g. "PKR"
-  defaultTimezone      String // IANA tz
-  loadedStatutoryPacks String[] // e.g. ["PK"] — which country packs are active
+  organizationId               String   @id
+  defaultCountryCode           String // ISO 3166-1 alpha-2, e.g. "PK"
+  defaultCurrency              String // ISO 4217, e.g. "PKR"
+  defaultTimezone              String // IANA tz
+  loadedStatutoryPacks         String[] // e.g. ["PK"] — which country packs are active
   // WBS 1.14 — workweek. JS day numbers (0 = Sunday … 6 = Saturday). Leave
   // day counts skip these days and org/branch holidays.
-  weekendDays          Int[]    @default([0, 6])
+  weekendDays                  Int[]    @default([0, 6])
   // WBS 3.10 — 1 = any leave approver decides; 2 = a first approval
   // (usually the manager) then a second, different approver.
-  leaveApprovalSteps   Int      @default(1)
+  leaveApprovalSteps           Int      @default(1)
   // WBS 3.4 — minutes after shift start before a check-in counts as late.
-  lateGraceMinutes     Int      @default(15)
+  lateGraceMinutes             Int      @default(15)
   // Feed — post "Happy birthday" automatically on employees' birthdays.
-  birthdayPostsEnabled Boolean  @default(true)
+  birthdayPostsEnabled         Boolean  @default(true)
   // Optional modules the company uses; the menu hides the others.
-  enabledModules       String[] @default(["performance", "training", "recruitment"])
+  enabledModules               String[] @default(["performance", "training", "recruitment"])
   // Performance: how KPIs may be scored — "RATING" (1–5), "TARGET"
   // (actual vs target) or "BOTH"; and whether employees review themselves.
-  kpiScoring           String   @default("BOTH")
-  selfReviewEnabled    Boolean  @default(true)
-  updatedAt            DateTime @updatedAt
+  kpiScoring                   String   @default("BOTH")
+  selfReviewEnabled            Boolean  @default(true)
+  // Attendance: how people record time by default — "APP" (the slide
+  // button), "MACHINE" (an attendance machine) or "BOTH" — and whether the
+  // app button only works on an office network / at an office location.
+  // Each employee can override these.
+  defaultCheckInMethod         String   @default("BOTH")
+  defaultRequireOfficeNetwork  Boolean  @default(false)
+  defaultRequireOfficeLocation Boolean  @default(false)
+  // Email people about leave, payslips, training, candidates and expiring
+  // documents/certificates.
+  emailNotificationsEnabled    Boolean  @default(true)
+  updatedAt                    DateTime @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id])
 }
@@ -445,12 +455,18 @@ model Employee {
   managerId      String? // self-relation — WBS 2.6
   shiftId        String? // WBS 3.1 — working hours used for late/overtime
 
-  employeeNumber String // unique per org, see @@unique below
-  firstName      String
-  lastName       String
-  email          String
-  phone          String?
-  designation    String // job title, free text for now
+  employeeNumber        String // unique per org, see @@unique below
+  firstName             String
+  lastName              String
+  email                 String
+  // Attendance: this person's number on the attendance machine, and their
+  // own check-in rules (null = the company default).
+  machineUserId         String?
+  checkInMethod         String? // APP, MACHINE, BOTH
+  requireOfficeNetwork  Boolean?
+  requireOfficeLocation Boolean?
+  phone                 String?
+  designation           String // job title, free text for now
 
   status         EmployeeStatus @default(ACTIVE)
   employmentType EmploymentType @default(FULL_TIME)
@@ -504,12 +520,14 @@ model Employee {
   birthdayPosts         FeedPost[]
   performanceReviews    PerformanceReview[]      @relation("ReviewEmployee")
   onboardingTasks       OnboardingTask[]
+  punches               AttendancePunch[]
   trainingEnrolments    TrainingEnrolment[]
   trainingRequests      TrainingRequest[]
   photo                 EmployeePhoto?
 
   @@unique([organizationId, employeeNumber])
   @@unique([organizationId, userId])
+  @@unique([organizationId, machineUserId])
   @@index([organizationId, status])
   @@index([managerId])
 }
@@ -635,6 +653,9 @@ model AttendanceRecord {
   earlyExitMinutes Int              @default(0)
   overtimeMinutes  Int              @default(0)
   workedMinutes    Int?
+  // Where an app check-in/out came from: { ip, latitude, longitude, accuracy, place }
+  checkInInfo      Json?
+  checkOutInfo     Json?
   createdAt        DateTime         @default(now())
 
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
@@ -1263,4 +1284,93 @@ model PasswordResetToken {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+// --- Attendance machines and check-in rules ---------------------------------
+// Any attendance machine can feed HRM:
+//   ADMS   — the machine sends punches itself (ZKTeco "Cloud Server"/ADMS
+//            push, and the many machines that copy it). Identified by its
+//            serial number.
+//   API    — any other system sends punches with a secret key.
+//   IMPORT — HR uploads a file exported from the machine's software.
+// Every punch lands in AttendancePunch; punches for a known machine ID
+// become check-in/check-out times (first punch of the day in, last out).
+// Punches nobody matches wait in the "unknown IDs" list until HR links them.
+
+enum AttendanceDeviceKind {
+  ADMS
+  API
+  IMPORT
+}
+
+model AttendanceDevice {
+  id             String               @id @default(cuid())
+  organizationId String
+  name           String
+  kind           AttendanceDeviceKind
+  serialNumber   String?              @unique // ADMS: the machine's serial number
+  apiKeyHash     String?              @unique // API: sha256 of the secret key
+  apiKeyHint     String? // last 4 characters, to tell keys apart
+  branchId       String?
+  // The machine's clock is local time with no timezone; this says which.
+  // Null = the branch's, then the company's timezone.
+  timezone       String?
+  isActive       Boolean              @default(true)
+  lastSeenAt     DateTime?
+  lastPunchAt    DateTime?
+  createdAt      DateTime             @default(now())
+
+  punches AttendancePunch[]
+
+  @@index([organizationId])
+}
+
+model AttendancePunch {
+  id             String    @id @default(cuid())
+  organizationId String
+  deviceId       String?
+  machineUserId  String
+  employeeId     String? // null until the machine ID is linked to someone
+  punchedAt      DateTime
+  workDate       DateTime? // the attendance day it counts for
+  kind           String? // IN / OUT / null — as reported, for reference
+  createdAt      DateTime  @default(now())
+
+  device   AttendanceDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  employee Employee?         @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, machineUserId, punchedAt]) // machines resend; keep one
+  @@index([organizationId, employeeId, workDate])
+  @@index([organizationId, employeeId])
+}
+
+// Where the app check-in button is allowed, for people who must be at work.
+model OfficeNetwork {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  cidr           String // one address (39.45.10.20) or a range (39.45.10.0/24), IPv4 or IPv6
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+}
+
+model OfficeLocation {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  latitude       Float
+  longitude      Float
+  radiusMeters   Int      @default(200)
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+}
+
+// Emails already sent for something that happens once (a document expiring
+// in 30 days), so the daily check never sends the same reminder twice.
+model ReminderLog {
+  id        String   @id @default(cuid())
+  key       String   @unique // e.g. "doc-expiry-30:<documentId>:<expiryDate>"
+  createdAt DateTime @default(now())
 }

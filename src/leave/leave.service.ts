@@ -12,6 +12,7 @@ import { countWorkingDays } from '../common/work-calendar';
 import { findEmployeeForUser, requireEmployeeForUser } from '../common/current-employee';
 import { hasPermission } from '../rbac/rbac.service';
 import { approverScope, assertInScope } from '../common/approver-scope';
+import { NotifyService } from '../notifications/notify.service';
 
 type CallingUser = { id: string; permissions?: string[] };
 
@@ -20,7 +21,10 @@ const OPEN_STATUSES = [LeaveRequestStatus.PENDING, LeaveRequestStatus.FIRST_APPR
 
 @Injectable()
 export class LeaveService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notify: NotifyService,
+  ) {}
 
   async createLeaveType(organizationId: string, dto: any) {
     return this.prisma.leaveType.create({
@@ -88,7 +92,7 @@ export class LeaveService {
     }
     await this.assertEnoughBalance(organizationId, employee, leaveType, startDate, days);
 
-    return this.prisma.leaveRequest.create({
+    const created = await this.prisma.leaveRequest.create({
       data: {
         organizationId,
         employeeId: employee.id,
@@ -100,6 +104,8 @@ export class LeaveService {
         status: LeaveRequestStatus.PENDING,
       },
     });
+    this.notify.leaveRequested(organizationId, created.id);
+    return created;
   }
 
   // HR approvers see everyone's requests, a manager sees their team's (and
@@ -208,6 +214,7 @@ export class LeaveService {
         metadata: { employeeId: request.employeeId, days: request.days },
       },
     });
+    this.notify.leaveDecided(organizationId, requestId, isFirstStep ? 'FIRST_APPROVED' : approve ? 'APPROVED' : 'REJECTED', approverUserId);
 
     return updated;
   }

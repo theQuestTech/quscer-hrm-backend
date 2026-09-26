@@ -42,6 +42,12 @@ export class UpdateOrganizationSettingsDto {
     message: 'Use 3–40 lowercase letters, numbers and dashes',
   })
   careersSlug?: string;
+  // Attendance: how people record time by default, and where the app button works.
+  @IsOptional() @IsIn(['APP', 'MACHINE', 'BOTH']) defaultCheckInMethod?: string;
+  @IsOptional() @IsBoolean() defaultRequireOfficeNetwork?: boolean;
+  @IsOptional() @IsBoolean() defaultRequireOfficeLocation?: boolean;
+  // Email people about leave, payslips, training, candidates and expiring documents.
+  @IsOptional() @IsBoolean() emailNotificationsEnabled?: boolean;
 }
 
 export class CreateBranchDto {
