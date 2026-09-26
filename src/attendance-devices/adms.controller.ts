@@ -1,7 +1,9 @@
 // ZKTeco "ADMS" / "Cloud Server" push — the protocol most attendance
 // machines in Pakistan speak (ZKTeco and the many machines built on it).
 // On the machine: Communication → Cloud Server Setting → server address =
-// this API's address, port 443 (HTTPS on) or 80. The machine then:
+// this API's address, port 443 with HTTPS on. Older machines without HTTPS
+// use the plain-HTTP machine port instead (see machine-port.ts). The machine
+// then:
 //   GET  /iclock/cdata?SN=…            → asks for its settings
 //   POST /iclock/cdata?SN=…&table=ATTLOG → uploads punches (tab-separated)
 //   GET  /iclock/getrequest?SN=…       → asks for commands (we have none)
@@ -57,6 +59,12 @@ export class AdmsController {
   @Get(['getrequest', 'getrequest.aspx'])
   async commands(@Query('SN') sn: string | undefined, @Res() res: Response) {
     await this.devices.admsDevice(sn);
+    text(res, 'OK');
+  }
+
+  // Some machines also upload fingerprint photos or other data; not needed.
+  @Post(['fdata', 'fdata.aspx'])
+  otherData(@Res() res: Response) {
     text(res, 'OK');
   }
 

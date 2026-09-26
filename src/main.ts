@@ -2,6 +2,8 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { text } from 'express';
+import { createServer } from 'http';
+import { machineOnly } from './attendance-devices/machine-port';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -20,5 +22,14 @@ async function bootstrap() {
   const port = process.env.PORT ?? 4100;
   await app.listen(port);
   console.log(`Quscer HRM backend listening on port ${port}`);
+
+  // Older attendance machines can only speak plain HTTP. MACHINE_PORT opens a
+  // second door that answers the machine address (/iclock) and nothing else.
+  const machinePort = process.env.MACHINE_PORT;
+  if (machinePort) {
+    createServer(machineOnly(app.getHttpAdapter().getInstance())).listen(Number(machinePort), () =>
+      console.log(`Attendance machines (plain HTTP) on port ${machinePort}`),
+    );
+  }
 }
 bootstrap();
