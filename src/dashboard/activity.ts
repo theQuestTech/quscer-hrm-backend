@@ -34,6 +34,11 @@ const PHRASES: Record<string, string> = {
   'feed.post_removed': 'removed a feed post',
   'feed.comment_removed': 'removed a feed comment',
   'organization.created': 'set up this company',
+  'performance.cycle_launched': 'started a performance review cycle',
+  'performance.cycle_closed': 'closed a performance review cycle',
+  'performance.goals_shared': 'shared performance goals',
+  'performance.self_submitted': 'submitted a self-review',
+  'performance.review_completed': 'completed a performance review',
 };
 
 export function activityPhrase(eventType: string): string {
@@ -46,6 +51,6 @@ export function activityKind(eventType: string): 'leave' | 'attendance' | 'payro
   if (eventType.startsWith('attendance.')) return 'attendance';
   if (eventType.startsWith('payroll.') || eventType.startsWith('settlement.')) return 'payroll';
   if (eventType.includes('document')) return 'document';
-  if (eventType.startsWith('employee.') || eventType.startsWith('user.')) return 'people';
+  if (eventType.startsWith('employee.') || eventType.startsWith('user.') || eventType.startsWith('performance.')) return 'people';
   return 'other';
 }

@@ -3,6 +3,7 @@ import {
   IsArray,
   IsBoolean,
   IsDateString,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -31,6 +32,11 @@ export class UpdateOrganizationSettingsDto {
   @IsOptional() @IsInt() @Min(0) @Max(240) lateGraceMinutes?: number;
   // Post "Happy birthday" on the feed automatically.
   @IsOptional() @IsBoolean() birthdayPostsEnabled?: boolean;
+  // Optional modules shown in the menu.
+  @IsOptional() @IsArray() @IsIn(['performance', 'training', 'recruitment'], { each: true }) enabledModules?: string[];
+  // Performance: "RATING" (1–5), "TARGET" (actual vs target) or "BOTH".
+  @IsOptional() @IsIn(['RATING', 'TARGET', 'BOTH']) kpiScoring?: string;
+  @IsOptional() @IsBoolean() selfReviewEnabled?: boolean;
 }
 
 export class CreateBranchDto {
