@@ -54,6 +54,15 @@ const PHRASES: Record<string, string> = {
   'recruitment.hired': 'hired a new employee',
   'onboarding.started': 'started onboarding for a new joiner',
   'onboarding.completed': 'finished an onboarding checklist',
+  'training.course_created': 'added a training course',
+  'training.session_planned': 'planned a training session',
+  'training.session_cancelled': 'cancelled a training session',
+  'training.enrolled': 'enrolled people in training',
+  'training.session_completed': 'marked a training session complete',
+  'training.recorded': 'recorded completed training',
+  'training.requested': 'asked for training',
+  'training.request_approved': 'approved a training request',
+  'training.request_rejected': 'turned down a training request',
 };
 
 export function activityPhrase(eventType: string): string {
@@ -66,6 +75,6 @@ export function activityKind(eventType: string): 'leave' | 'attendance' | 'payro
   if (eventType.startsWith('attendance.')) return 'attendance';
   if (eventType.startsWith('payroll.') || eventType.startsWith('settlement.')) return 'payroll';
   if (eventType.includes('document')) return 'document';
-  if (eventType.startsWith('employee.') || eventType.startsWith('user.') || eventType.startsWith('performance.') || eventType.startsWith('recruitment.') || eventType.startsWith('onboarding.')) return 'people';
+  if (eventType.startsWith('employee.') || eventType.startsWith('user.') || eventType.startsWith('performance.') || eventType.startsWith('recruitment.') || eventType.startsWith('onboarding.') || eventType.startsWith('training.')) return 'people';
   return 'other';
 }

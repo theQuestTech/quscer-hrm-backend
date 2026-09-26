@@ -503,6 +503,8 @@ model Employee {
   birthdayPosts         FeedPost[]
   performanceReviews    PerformanceReview[]      @relation("ReviewEmployee")
   onboardingTasks       OnboardingTask[]
+  trainingEnrolments    TrainingEnrolment[]
+  trainingRequests      TrainingRequest[]
   photo                 EmployeePhoto?
 
   @@unique([organizationId, employeeNumber])
@@ -1123,5 +1125,125 @@ model OnboardingTask {
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, doneAt])
+  @@index([employeeId])
+}
+
+// --- Training ---------------------------------------------------------------
+// A course is something the company trains people on. A session is one
+// sitting of it (date, place, trainer, seats). People are enrolled in a
+// session; afterwards HR marks who completed it, which credits training
+// hours and — if the course has a validity — gives a certificate that
+// expires. Training done elsewhere can be recorded without a session.
+// Employees can ask for training; their manager or HR decides.
+
+enum TrainingDelivery {
+  CLASSROOM
+  ONLINE
+  ON_THE_JOB
+}
+
+enum TrainingSessionStatus {
+  PLANNED
+  DONE
+  CANCELLED
+}
+
+enum EnrolmentStatus {
+  ENROLLED
+  COMPLETED
+  NO_SHOW
+  CANCELLED
+}
+
+enum TrainingRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  BOOKED
+}
+
+model TrainingCourse {
+  id             String           @id @default(cuid())
+  organizationId String
+  title          String
+  description    String?
+  category       String? // e.g. "Safety", "Sales", "Compliance"
+  provider       String? // who runs it, if not in-house
+  delivery       TrainingDelivery @default(CLASSROOM)
+  durationHours  Float?
+  costPerPerson  Int?
+  // Certificates from this course expire after this many months (e.g. first
+  // aid, fire safety). Null = never expires.
+  validityMonths Int?
+  isActive       Boolean          @default(true)
+  createdAt      DateTime         @default(now())
+
+  sessions   TrainingSession[]
+  enrolments TrainingEnrolment[]
+  requests   TrainingRequest[]
+
+  @@index([organizationId])
+}
+
+model TrainingSession {
+  id             String                @id @default(cuid())
+  organizationId String
+  courseId       String
+  startsAt       DateTime
+  endsAt         DateTime
+  location       String? // room, address or meeting link
+  trainer        String?
+  capacity       Int?
+  status         TrainingSessionStatus @default(PLANNED)
+  createdAt      DateTime              @default(now())
+
+  course     TrainingCourse      @relation(fields: [courseId], references: [id])
+  enrolments TrainingEnrolment[]
+
+  @@index([organizationId, startsAt])
+}
+
+model TrainingEnrolment {
+  id                   String          @id @default(cuid())
+  organizationId       String
+  courseId             String
+  sessionId            String? // null = training done elsewhere, recorded by HR
+  employeeId           String
+  status               EnrolmentStatus @default(ENROLLED)
+  completedAt          DateTime?
+  hours                Float?
+  score                Int? // optional test score, 0–100
+  certificateExpiresAt DateTime?
+  feedbackRating       Int? // 1–5 from the employee
+  feedbackComment      String?
+  createdAt            DateTime        @default(now())
+
+  course   TrainingCourse   @relation(fields: [courseId], references: [id])
+  session  TrainingSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  employee Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, employeeId])
+  @@index([organizationId, status])
+  @@index([employeeId])
+  @@index([organizationId, certificateExpiresAt])
+}
+
+model TrainingRequest {
+  id              String                @id @default(cuid())
+  organizationId  String
+  employeeId      String
+  courseId        String? // from the company's list, or…
+  title           String // …a course they found themselves
+  reason          String
+  status          TrainingRequestStatus @default(PENDING)
+  decidedByUserId String?
+  decidedAt       DateTime?
+  decisionNote    String?
+  createdAt       DateTime              @default(now())
+
+  employee Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  course   TrainingCourse? @relation(fields: [courseId], references: [id])
+
+  @@index([organizationId, status])
   @@index([employeeId])
 }
