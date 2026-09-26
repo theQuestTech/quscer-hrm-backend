@@ -13,6 +13,7 @@ import { SetupModule } from './setup/setup.module';
 import { UsersModule } from './users/users.module';
 import { FeedModule } from './feed/feed.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { PerformanceModule } from './performance/performance.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     UsersModule,
     FeedModule,
     DashboardModule,
+    PerformanceModule,
   ],
 })
 export class AppModule {}

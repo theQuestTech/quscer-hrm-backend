@@ -163,6 +163,8 @@ export class AuthService {
         name: organization.name,
         currency: organization.localeSettings?.defaultCurrency ?? 'PKR',
         timezone: organization.localeSettings?.defaultTimezone ?? 'Asia/Karachi',
+        modules: organization.localeSettings?.enabledModules ?? ['performance', 'training', 'recruitment'],
+        kpiScoring: organization.localeSettings?.kpiScoring ?? 'BOTH',
       },
       companies: await this.companies(userId),
       roles: user.roleAssignments.map((a) => a.role.name),
