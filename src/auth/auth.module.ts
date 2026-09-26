@@ -5,12 +5,13 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { RbacModule } from '../rbac/rbac.module';
-import { Mailer } from './mailer';
+import { MailModule } from '../notifications/mail.module';
 import { PasswordResetService } from './password-reset';
 
 @Module({
   imports: [
     RbacModule,
+    MailModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -21,7 +22,7 @@ import { PasswordResetService } from './password-reset';
     }),
   ],
   controllers: [AuthController],
-  providers: [JwtAuthGuard, AuthService, Mailer, PasswordResetService],
-  exports: [JwtModule, JwtAuthGuard],
+  providers: [JwtAuthGuard, AuthService, PasswordResetService],
+  exports: [JwtModule, JwtAuthGuard, PasswordResetService],
 })
 export class AuthModule {}

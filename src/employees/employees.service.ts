@@ -9,6 +9,8 @@ import { FieldEncryptionService } from '../crypto/field-encryption.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { QueryEmployeesDto } from './dto/query-employees.dto';
+import { PunchService } from '../attendance-devices/punch.service';
+import { normalizeMachineId } from '../attendance-devices/punch-rules';
 
 export const MAX_DOCUMENT_BYTES = 5 * 1024 * 1024;
 
@@ -36,7 +38,20 @@ export class EmployeesService {
   constructor(
     private prisma: PrismaService,
     private fieldEncryption: FieldEncryptionService,
+    private punches: PunchService,
   ) {}
+
+  // "00012" on the machine = "12" here; also checks nobody else has it.
+  private async machineId(organizationId: string, value: string | null | undefined, selfId?: string) {
+    if (value === undefined) return undefined;
+    if (value === null || !value.trim()) return null;
+    const id = normalizeMachineId(value);
+    const taken = await this.prisma.employee.findFirst({
+      where: { organizationId, machineUserId: id, ...(selfId && { id: { not: selfId } }) },
+    });
+    if (taken) throw new ConflictException(`Machine ID ${id} already belongs to ${taken.firstName} ${taken.lastName}`);
+    return id;
+  }
 
   // Tenant isolation for references: a branch/department/manager ID from
   // another organization must never be linkable just because it exists.
@@ -123,6 +138,10 @@ export class EmployeesService {
           city: dto.city,
           countryCode,
           regionCode,
+          machineUserId: await this.machineId(organizationId, dto.machineUserId),
+          checkInMethod: dto.checkInMethod ?? null,
+          requireOfficeNetwork: dto.requireOfficeNetwork ?? null,
+          requireOfficeLocation: dto.requireOfficeLocation ?? null,
         },
       });
     } catch (e: any) {
@@ -133,6 +152,8 @@ export class EmployeesService {
       }
       throw e;
     }
+
+    if (employee.machineUserId) await this.punches.relink(organizationId, employee.id);
 
     await this.prisma.auditEvent.create({
       data: {
@@ -214,7 +235,8 @@ export class EmployeesService {
     await this.findOne(organizationId, id); // 404s if not found or wrong org
     await this.assertRefsInOrg(organizationId, dto, id);
 
-    const { status, dateOfJoining, dateOfBirth, probationEndDate, contractEndDate, confirmedAt, ...rest } = dto;
+    const { status, dateOfJoining, dateOfBirth, probationEndDate, contractEndDate, confirmedAt, machineUserId, ...rest } = dto;
+    const machine = await this.machineId(organizationId, machineUserId, id);
     const toDate = (v?: string | null) => (v === undefined ? undefined : v === null ? null : new Date(v));
     const employee = await this.prisma.employee.update({
       where: { id },
@@ -226,8 +248,10 @@ export class EmployeesService {
         probationEndDate: toDate(probationEndDate),
         contractEndDate: toDate(contractEndDate),
         confirmedAt: toDate(confirmedAt),
+        ...(machine !== undefined && { machineUserId: machine }),
       },
     });
+    if (machine) await this.punches.relink(organizationId, employee.id);
 
     await this.prisma.auditEvent.create({
       data: {

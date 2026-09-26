@@ -1,4 +1,7 @@
 import {
+  IsBoolean,
+  IsIn,
+  Matches,
   IsDateString,
   IsEmail,
   IsEnum,
@@ -76,4 +79,22 @@ export class CreateEmployeeDto extends PersonalDetailsDto {
   @IsOptional()
   @IsString()
   regionCode?: string;
+
+  // Attendance: their number on the attendance machine, and their own
+  // check-in rules (null = company default).
+  @IsOptional()
+  @Matches(/^[A-Za-z0-9_-]{1,40}$/, { message: 'Machine ID can only have letters, numbers, - and _' })
+  machineUserId?: string | null;
+
+  @IsOptional()
+  @IsIn(['APP', 'MACHINE', 'BOTH'])
+  checkInMethod?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  requireOfficeNetwork?: boolean | null;
+
+  @IsOptional()
+  @IsBoolean()
+  requireOfficeLocation?: boolean | null;
 }

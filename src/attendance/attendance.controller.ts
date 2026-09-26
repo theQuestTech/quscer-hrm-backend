@@ -1,5 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { visitorAddress } from '../common/visitor-address';
+import { CheckInLocationDto } from './dto/check-in.dto';
 import { PermissionGuard, RequirePermission } from '../rbac/permission.guard';
 import { AttendanceService } from './attendance.service';
 import { MarkAttendanceDto, QueryCorrectionsDto, RequestCorrectionDto } from './dto/mark-attendance.dto';
@@ -15,14 +17,14 @@ export class AttendanceController {
   // in/out for themselves.
   @Post('check-in')
   @RequirePermission('hrm.attendance.read')
-  checkIn(@Req() req: any) {
-    return this.attendanceService.checkIn(req.user.organizationId, req.user.id);
+  checkIn(@Req() req: any, @Body() dto: CheckInLocationDto) {
+    return this.attendanceService.checkIn(req.user.organizationId, req.user.id, { ip: visitorAddress(req), ...dto });
   }
 
   @Post('check-out')
   @RequirePermission('hrm.attendance.read')
-  checkOut(@Req() req: any) {
-    return this.attendanceService.checkOut(req.user.organizationId, req.user.id);
+  checkOut(@Req() req: any, @Body() dto: CheckInLocationDto) {
+    return this.attendanceService.checkOut(req.user.organizationId, req.user.id, { ip: visitorAddress(req), ...dto });
   }
 
   @Get('today')

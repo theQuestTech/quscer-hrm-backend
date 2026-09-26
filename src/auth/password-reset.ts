@@ -13,6 +13,10 @@ import { Mailer } from './mailer';
 export const RESET_LINK_MINUTES = 60;
 const SALT_ROUNDS = 10;
 
+export function appUrl(): string {
+  return (process.env.APP_URL ?? 'https://hrm.quscer.com').replace(/\/$/, '');
+}
+
 export function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
@@ -57,6 +61,18 @@ export class PasswordResetService {
     return { ok: true as const, emailEnabled: this.mailer.enabled };
   }
 
+  // A one-time "choose your password" link for a new login (welcome email).
+  async setPasswordLink(userId: string, validMinutes: number): Promise<string> {
+    const token = newToken();
+    await this.prisma.$transaction([
+      this.prisma.passwordResetToken.deleteMany({ where: { userId, usedAt: null } }),
+      this.prisma.passwordResetToken.create({
+        data: { userId, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + validMinutes * 60_000) },
+      }),
+    ]);
+    return `${appUrl()}/reset-password?token=${token}`;
+  }
+
   async request(emailAddress: string): Promise<{ ok: true; emailEnabled: boolean }> {
     const answer = this.answer();
     if (!this.mailer.enabled) return answer;
@@ -74,8 +90,7 @@ export class PasswordResetService {
         data: { userId: user.id, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + RESET_LINK_MINUTES * 60_000) },
       }),
     ]);
-    const appUrl = (process.env.APP_URL ?? 'https://hrm.quscer.com').replace(/\/$/, '');
-    const email = resetEmail(user.firstName, `${appUrl}/reset-password?token=${token}`);
+    const email = resetEmail(user.firstName, `${appUrl()}/reset-password?token=${token}`);
     await this.mailer.send({ to: user.email, ...email });
     await this.prisma.auditEvent.create({
       data: { organizationId: user.organizationId, actorUserId: user.id, eventType: 'user.password_reset_requested', entityType: 'User', entityId: user.id },

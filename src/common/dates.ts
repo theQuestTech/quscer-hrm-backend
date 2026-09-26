@@ -90,3 +90,41 @@ export function zonedTime(day: Date, hhmm: string, timeZone?: string | null): Da
     return new Date(wall);
   }
 }
+
+// The instant a wall-clock time "YYYY-MM-DD HH:mm[:ss]" is in `timeZone`
+// (attendance machines report local time with no zone). Null if it can't be
+// read.
+export function wallClockToUtc(wall: string, timeZone?: string | null): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(wall.trim());
+  if (!m) return null;
+  const [, y, mo, d, h, mi, s] = m;
+  const ms = Date.UTC(+y, +mo - 1, +d, +h, +mi, s ? +s : 0);
+  if (Number.isNaN(ms) || +mo < 1 || +mo > 12 || +d < 1 || +d > 31 || +h > 23 || +mi > 59) return null;
+  if (!timeZone) return new Date(ms);
+  try {
+    let guess = ms - offsetMinutes(timeZone, new Date(ms)) * 60000;
+    guess = ms - offsetMinutes(timeZone, new Date(guess)) * 60000;
+    return new Date(guess);
+  } catch {
+    return new Date(ms);
+  }
+}
+
+// Local calendar date (midnight UTC) and minutes past local midnight for an
+// instant in `timeZone`.
+export function localDayAndMinutes(at: Date, timeZone?: string | null): { day: Date; minutes: number } {
+  let zone = timeZone || 'UTC';
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    }).formatToParts(at);
+  } catch {
+    zone = 'UTC';
+    parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    }).formatToParts(at);
+  }
+  const get = (type: string) => Number(parts.find((p) => p.type === type)!.value);
+  return { day: new Date(Date.UTC(get('year'), get('month') - 1, get('day'))), minutes: get('hour') * 60 + get('minute') };
+}

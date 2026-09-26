@@ -19,6 +19,7 @@ import {
 } from './recruitment.dto';
 import { MAX_CV_BYTES, acceptingApplications, canMoveTo, cvFileName, slugify, sniffCvType } from './recruitment-rules';
 import { OfferLetterData, offerLetterPdf } from './offer-letter';
+import { NotifyService } from '../notifications/notify.service';
 
 const STAGES = Object.values(ApplicationStage);
 const person = { select: { id: true, firstName: true, lastName: true, designation: true, photoUpdatedAt: true } } as const;
@@ -36,6 +37,7 @@ export class RecruitmentService {
     private rbac: RbacService,
     private employees: EmployeesService,
     private onboarding: OnboardingService,
+    private notify: NotifyService,
   ) {}
 
   // --- Access ---------------------------------------------------------------
@@ -633,6 +635,7 @@ export class RecruitmentService {
         metadata: { jobTitle: job.title, name: `${app.firstName} ${app.lastName}` },
       },
     });
+    this.notify.candidateApplied(org.id, app.id);
     return { ok: true };
   }
 

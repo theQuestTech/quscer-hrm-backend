@@ -17,6 +17,8 @@ import { PerformanceModule } from './performance/performance.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { RecruitmentModule } from './recruitment/recruitment.module';
 import { TrainingModule } from './training/training.module';
+import { AttendanceDevicesModule } from './attendance-devices/devices.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -38,6 +40,8 @@ import { TrainingModule } from './training/training.module';
     OnboardingModule,
     RecruitmentModule,
     TrainingModule,
+    AttendanceDevicesModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}

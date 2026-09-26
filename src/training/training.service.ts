@@ -16,6 +16,7 @@ import {
 } from './training.dto';
 import { EXPIRING_SOON_DAYS, certificateExpiry, certificateState, creditedHours, seatsLeft } from './training-rules';
 import { certificatePdf } from './certificate';
+import { NotifyService } from '../notifications/notify.service';
 
 const person = { select: { id: true, firstName: true, lastName: true, designation: true, photoUpdatedAt: true, departmentId: true, managerId: true } } as const;
 const courseRef = { select: { id: true, title: true, category: true, delivery: true, validityMonths: true, durationHours: true } } as const;
@@ -29,6 +30,7 @@ export class TrainingService {
   constructor(
     private prisma: PrismaService,
     private rbac: RbacService,
+    private notify: NotifyService,
   ) {}
 
   // --- Access ---------------------------------------------------------------
@@ -221,6 +223,7 @@ export class TrainingService {
       data: { status: TrainingRequestStatus.BOOKED },
     });
     if (toAdd.length) await this.audit(caller, 'training.enrolled', 'TrainingSession', sessionId, { count: toAdd.length });
+    this.notify.trainingBooked(caller.organizationId, sessionId, toAdd);
     return this.getSession(caller, sessionId);
   }
 

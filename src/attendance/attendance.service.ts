@@ -11,6 +11,7 @@ import { computeShiftMetrics } from './shift-metrics';
 import { approverScope, assertInScope } from '../common/approver-scope';
 import { findEmployeeForUser, requireEmployeeForUser } from '../common/current-employee';
 import { hasPermission } from '../rbac/rbac.service';
+import { CheckInContext, CheckInRulesService } from '../attendance-devices/checkin-rules.service';
 
 // A "day" is stored as midnight UTC of the calendar date, but WHICH calendar
 // date "now" is follows the employee's Branch timezone (falling back to the
@@ -30,7 +31,10 @@ const HOURS_TO_CLOSE_OVERNIGHT = 20;
 
 @Injectable()
 export class AttendanceService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private rules: CheckInRulesService,
+  ) {}
 
   private async todayFor(organizationId: string, branchTimezone?: string | null) {
     if (branchTimezone) return todayInTimeZone(branchTimezone);
@@ -40,8 +44,9 @@ export class AttendanceService {
     return todayInTimeZone(settings?.defaultTimezone);
   }
 
-  async checkIn(organizationId: string, userId: string) {
+  async checkIn(organizationId: string, userId: string, ctx: CheckInContext) {
     const employee = await requireEmployeeForUser(this.prisma, organizationId, userId);
+    const info = await this.rules.check(organizationId, userId, employee, ctx, 'check-in');
     const today = await this.todayFor(organizationId, employee.branch?.timezone);
 
     const existing = await this.prisma.attendanceRecord.findUnique({
@@ -60,10 +65,11 @@ export class AttendanceService {
         employeeId: employee.id,
         date: today,
         checkIn: now,
+        checkInInfo: info,
         source: AttendanceSource.APP_CHECKIN,
         ...timing,
       },
-      update: { checkIn: now, source: AttendanceSource.APP_CHECKIN, ...timing },
+      update: { checkIn: now, checkInInfo: info, source: AttendanceSource.APP_CHECKIN, ...timing },
     });
   }
 
@@ -88,8 +94,9 @@ export class AttendanceService {
     return { ...minutes, status: isLate ? AttendanceStatus.LATE : AttendanceStatus.PRESENT };
   }
 
-  async checkOut(organizationId: string, userId: string) {
+  async checkOut(organizationId: string, userId: string, ctx: CheckInContext) {
     const employee = await requireEmployeeForUser(this.prisma, organizationId, userId);
+    const info = await this.rules.check(organizationId, userId, employee, ctx, 'check-out');
     const today = await this.todayFor(organizationId, employee.branch?.timezone);
 
     const now = new Date();
@@ -119,7 +126,7 @@ export class AttendanceService {
       where: { id: existing.id },
       // Keep a manager's status (e.g. HALF_DAY) — only a PRESENT/LATE
       // status is re-derived from the times.
-      data: { checkOut: now, ...this.keepManualStatus(existing.status, timing) },
+      data: { checkOut: now, checkOutInfo: info, ...this.keepManualStatus(existing.status, timing) },
     });
   }
 
@@ -133,7 +140,8 @@ export class AttendanceService {
   // the check-in / check-out button state.
   async today(organizationId: string, userId: string) {
     const employee = await findEmployeeForUser(this.prisma, organizationId, userId);
-    if (!employee) return { employeeLinked: false, date: null, record: null };
+    if (!employee) return { employeeLinked: false, date: null, record: null, rules: null };
+    const rules = await this.rules.rulesFor(organizationId, employee);
     const today = await this.todayFor(organizationId, employee.branch?.timezone);
     let record = await this.prisma.attendanceRecord.findUnique({
       where: { employeeId_date: { employeeId: employee.id, date: today } },
@@ -149,7 +157,7 @@ export class AttendanceService {
         record = open;
       }
     }
-    return { employeeLinked: true, date: record?.date ?? today, record };
+    return { employeeLinked: true, date: record?.date ?? today, record, rules };
   }
 
   // Admin/manager path — mark attendance for someone else (e.g. from a
