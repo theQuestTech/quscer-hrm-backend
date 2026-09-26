@@ -1,8 +1,7 @@
-// DELIBERATELY MINIMAL. This exists only so the JwtAuthGuard/PermissionGuard
-// chain is testable end-to-end before Quscer OS SSO connects (WBS 6.1).
-// No password reset, no email verification, no "remember me" — don't build
-// those here. When 6.1 lands, this whole module gets replaced by shared
-// Quscer session validation, not hardened into a real auth system.
+// Sign-in for now: email + password, one login per email, several companies
+// per login. Password reset by email lives in password-reset.ts. When Quscer
+// OS single sign-on arrives (WBS 6.1), this is replaced by shared Quscer
+// session validation.
 
 import {
   BadRequestException,

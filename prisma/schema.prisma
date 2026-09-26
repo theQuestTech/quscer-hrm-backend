@@ -61,6 +61,7 @@ model User {
   feedPosts       FeedPost[]
   feedComments    FeedComment[]
   feedLikes       FeedLike[]
+  passwordResets  PasswordResetToken[]
 
   @@unique([organizationId, email])
   @@index([organizationId])
@@ -1246,4 +1247,20 @@ model TrainingRequest {
 
   @@index([organizationId, status])
   @@index([employeeId])
+}
+
+// "Forgot password?" links. Only a hash of the token is stored, so a copy of
+// the database can't be used to reset anyone's password. Each link works
+// once and expires after an hour.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

@@ -54,6 +54,7 @@ const PHRASES: Record<string, string> = {
   'recruitment.hired': 'hired a new employee',
   'onboarding.started': 'started onboarding for a new joiner',
   'onboarding.completed': 'finished an onboarding checklist',
+  'user.password_reset_by_email': 'reset their password by email',
   'training.course_created': 'added a training course',
   'training.session_planned': 'planned a training session',
   'training.session_cancelled': 'cancelled a training session',
