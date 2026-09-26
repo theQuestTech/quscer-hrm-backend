@@ -62,7 +62,15 @@ export class AuthController {
   @Get('me')
   @UseGuards(JwtAuthGuard)
   async me(@Req() req: any) {
-    return this.authService.me(req.user.id, req.user.organizationId);
+    return this.authService.me(req.user);
+  }
+
+  // Ends a Quscer support view early (the only change a view can make).
+  @Post('end-support-view')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  endSupportView(@Req() req: any) {
+    return this.authService.endSupportView(req.user);
   }
 
   @Post('change-password')

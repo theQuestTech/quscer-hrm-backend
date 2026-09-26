@@ -11,6 +11,8 @@ async function bootstrap() {
   // Attendance machines (ZKTeco ADMS) upload punches as plain text, whatever
   // content type they claim. Read it as text before the JSON/form parsers.
   app.use('/iclock', text({ type: () => true, limit: '5mb' }));
+  // Resend's delivery reports are signed over the exact body, so keep it as text.
+  app.use('/webhooks/resend', text({ type: () => true, limit: '1mb' }));
   // CORS_ORIGINS (comma-separated) limits which sites may call the API —
   // set it to the frontend's URL in production. Unset = any origin (dev only).
   const corsOrigins = process.env.CORS_ORIGINS?.split(',').map((o) => o.trim()).filter(Boolean);

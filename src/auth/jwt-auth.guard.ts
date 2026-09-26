@@ -1,16 +1,25 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { PrismaService } from '../prisma/prisma.service';
+import { SUSPENDED_MESSAGE, isSuspended } from '../common/org-status';
 
 export interface RequestUser {
   id: string;
   organizationId: string;
   email: string;
+  // Set when Quscer support is looking at HRM as this person (read-only).
+  view?: { sessionId: string; agentId: string };
 }
+
+// The only change a support view may make: ending itself.
+const END_VIEW_PATH = '/auth/end-support-view';
+export const READ_ONLY_MESSAGE = 'This is a read-only Quscer support view — nothing can be changed.';
 
 // Standalone JWT validation for now. Once this app is connected to Quscer OS
 // (WBS 6.1 — "Synchronize Quscer user profile across subscribed apps"), this
@@ -18,7 +27,10 @@ export interface RequestUser {
 // its own — do not build long-lived local password auth beyond this scaffold.
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  constructor(private jwtService: JwtService) {}
+  constructor(
+    private jwtService: JwtService,
+    private prisma: PrismaService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
@@ -30,16 +42,35 @@ export class JwtAuthGuard implements CanActivate {
 
     const token = authHeader.slice('Bearer '.length);
 
+    let payload: RequestUser;
     try {
-      const payload = await this.jwtService.verifyAsync<RequestUser>(token);
-      request.user = {
-        id: payload.id,
-        organizationId: payload.organizationId,
-        email: payload.email,
-      };
-      return true;
+      payload = await this.jwtService.verifyAsync<RequestUser>(token);
     } catch {
       throw new UnauthorizedException('Invalid or expired token');
     }
+    if (!payload.id || !payload.organizationId) throw new UnauthorizedException('Invalid or expired token');
+
+    if (payload.view) {
+      // Support view: look, never touch. It also ends early when support
+      // (or the viewer) ends it.
+      const method = String(request.method).toUpperCase();
+      if (method !== 'GET' && method !== 'HEAD' && !(method === 'POST' && request.path === END_VIEW_PATH)) {
+        throw new ForbiddenException(READ_ONLY_MESSAGE);
+      }
+      const session = await this.prisma.supportViewSession.findUnique({ where: { id: payload.view.sessionId } });
+      if (!session || session.endedAt || session.expiresAt < new Date() || session.userId !== payload.id) {
+        throw new UnauthorizedException('The support view has ended');
+      }
+    } else if (await isSuspended(this.prisma, payload.organizationId)) {
+      throw new ForbiddenException(SUSPENDED_MESSAGE);
+    }
+
+    request.user = {
+      id: payload.id,
+      organizationId: payload.organizationId,
+      email: payload.email,
+      ...(payload.view && { view: { sessionId: payload.view.sessionId, agentId: payload.view.agentId } }),
+    } satisfies RequestUser;
+    return true;
   }
 }

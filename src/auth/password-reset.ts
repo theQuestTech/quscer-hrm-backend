@@ -91,7 +91,7 @@ export class PasswordResetService {
       }),
     ]);
     const email = resetEmail(user.firstName, `${appUrl()}/reset-password?token=${token}`);
-    await this.mailer.send({ to: user.email, ...email });
+    await this.mailer.send({ to: user.email, ...email }, { organizationId: user.organizationId, kind: 'password_reset' });
     await this.prisma.auditEvent.create({
       data: { organizationId: user.organizationId, actorUserId: user.id, eventType: 'user.password_reset_requested', entityType: 'User', entityId: user.id },
     });

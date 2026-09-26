@@ -20,6 +20,11 @@ import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { findEmployeeForUser } from '../common/current-employee';
 import { findActiveMembership } from '../common/membership';
+import { SUSPENDED_MESSAGE } from '../common/org-status';
+import type { RequestUser } from './jwt-auth.guard';
+
+// How often "last seen" is written for someone using the app.
+const SEEN_EVERY_MS = 5 * 60 * 1000;
 
 const SALT_ROUNDS = 10;
 
@@ -63,6 +68,7 @@ export class AuthService {
         passwordHash: await bcrypt.hash(dto.password, SALT_ROUNDS),
         firstName: dto.firstName,
         lastName: dto.lastName,
+        lastSeenAt: new Date(),
       },
     });
     await this.setUpOrganization(organization.id, user.id);
@@ -100,7 +106,7 @@ export class AuthService {
   // The companies this login can open, for the company switcher.
   async companies(userId: string) {
     const memberships = await this.prisma.membership.findMany({
-      where: { userId, isActive: true, user: { isActive: true } },
+      where: { userId, isActive: true, user: { isActive: true }, organization: { suspendedAt: null } },
       include: { organization: { select: { id: true, name: true } } },
     });
     return memberships
@@ -121,14 +127,19 @@ export class AuthService {
     const candidates = await this.prisma.user.findMany({
       where: { email: dto.email.toLowerCase(), isActive: true },
       orderBy: { createdAt: 'asc' },
-      include: { memberships: { where: { isActive: true }, orderBy: { createdAt: 'asc' } } },
+      include: {
+        memberships: { where: { isActive: true }, orderBy: { createdAt: 'asc' }, include: { organization: { select: { suspendedAt: true } } } },
+      },
     });
     for (const user of candidates) {
       if (!user.passwordHash || !(await bcrypt.compare(dto.password, user.passwordHash))) continue;
+      const open = user.memberships.filter((m) => !m.organization.suspendedAt);
+      // Right password, but every company they belong to is switched off.
+      if (!open.length && user.memberships.length) throw new ForbiddenException(SUSPENDED_MESSAGE);
       // Open their own company if they still have it, else the first other one.
-      const membership =
-        user.memberships.find((m) => m.organizationId === user.organizationId) ?? user.memberships[0];
+      const membership = open.find((m) => m.organizationId === user.organizationId) ?? open[0];
       if (!membership) break;
+      await this.prisma.user.update({ where: { id: user.id }, data: { lastSeenAt: new Date() } });
       return this.issueToken(user.id, membership.organizationId, user.email);
     }
     throw new UnauthorizedException('Invalid email or password');
@@ -137,7 +148,8 @@ export class AuthService {
   // Everything the frontend needs to render the right screens for this user:
   // who they are, their org, their effective permissions, and the employee
   // record (if any) that self-service features act on.
-  async me(userId: string, organizationId: string) {
+  async me(caller: RequestUser) {
+    const { id: userId, organizationId } = caller;
     const [user, organization] = await Promise.all([
       this.prisma.user.findFirst({
         where: { id: userId, isActive: true, memberships: { some: { organizationId, isActive: true } } },
@@ -146,6 +158,16 @@ export class AuthService {
       this.prisma.organization.findUnique({ where: { id: organizationId }, include: { localeSettings: true } }),
     ]);
     if (!user || !organization) throw new UnauthorizedException('User not found or inactive');
+    // A support view isn't the person using the app.
+    if (!caller.view && (!user.lastSeenAt || Date.now() - user.lastSeenAt.getTime() > SEEN_EVERY_MS)) {
+      await this.prisma.user.update({ where: { id: userId }, data: { lastSeenAt: new Date() } });
+    }
+    const supportView = caller.view
+      ? await this.prisma.supportViewSession.findUnique({
+          where: { id: caller.view.sessionId },
+          select: { expiresAt: true, agent: { select: { name: true } } },
+        })
+      : null;
 
     const permissions = await this.rbacService.getEffectivePermissions(userId, organizationId);
     const employee = await findEmployeeForUser(this.prisma, organizationId, userId);
@@ -179,6 +201,7 @@ export class AuthService {
       involvement: { recruiting: hiringOrInterviewing > 0, onboarding: onboardingTasks > 0 },
       companies: await this.companies(userId),
       roles: user.roleAssignments.map((a) => a.role.name),
+      supportView: supportView && { agentName: supportView.agent.name, expiresAt: supportView.expiresAt },
       permissions: [...permissions].sort(),
       employee: employee && {
         id: employee.id,
@@ -212,6 +235,16 @@ export class AuthService {
       data: { organizationId, actorUserId: userId, eventType: 'user.password_changed', entityType: 'User', entityId: userId },
     });
     return { changed: true };
+  }
+
+  // "End view" in the support banner.
+  async endSupportView(caller: RequestUser) {
+    if (!caller.view) return { ended: false };
+    await this.prisma.supportViewSession.updateMany({
+      where: { id: caller.view.sessionId, endedAt: null },
+      data: { endedAt: new Date() },
+    });
+    return { ended: true };
   }
 
   private assertPermissionCatalog(permissionCount: number) {
