@@ -64,10 +64,43 @@ const PHRASES: Record<string, string> = {
   'training.requested': 'asked for training',
   'training.request_approved': 'approved a training request',
   'training.request_rejected': 'turned down a training request',
+  'recruitment.job_draft': 'moved a job back to draft',
+  'attendance.device_added': 'added an attendance machine',
+  'attendance.device_key_replaced': "replaced an attendance machine's key",
+  'attendance.machine_id_linked': 'linked a machine ID to an employee',
+  'attendance.punches_imported': 'imported punches from an attendance machine',
+  'attendance.checkin_blocked': 'was stopped from checking in',
+  'user.password_reset_requested': 'asked for a password reset link',
+  'support.company.suspended': 'switched this company off',
+  'support.company.resumed': 'switched this company back on',
+  'support.user.reset_link_sent': 'sent a password reset link',
+  'support.user.welcome_resent': 'resent the welcome email',
+  'support.user.viewed': 'viewed Quscer People as {subject}, read-only',
 };
 
 export function activityPhrase(eventType: string): string {
   return PHRASES[eventType] ?? eventType.replace(/[._]/g, ' ');
+}
+
+// The areas people filter the activity history by.
+export const ACTIVITY_AREAS = {
+  payroll: ['payroll.', 'settlement.'],
+  leave: ['leave.'],
+  people: ['employee.', 'onboarding.', 'feed.'],
+  attendance: ['attendance.'],
+  recruitment: ['recruitment.'],
+  training: ['training.'],
+  performance: ['performance.'],
+  access: ['user.', 'organization.'],
+  support: ['support.'],
+} as const;
+export type ActivityArea = keyof typeof ACTIVITY_AREAS;
+
+export function activityArea(eventType: string): ActivityArea | 'other' {
+  for (const [area, prefixes] of Object.entries(ACTIVITY_AREAS)) {
+    if (prefixes.some((p) => eventType.startsWith(p))) return area as ActivityArea;
+  }
+  return 'other';
 }
 
 // Rough grouping for the icon shown next to each line.
@@ -78,4 +111,14 @@ export function activityKind(eventType: string): 'leave' | 'attendance' | 'payro
   if (eventType.includes('document')) return 'document';
   if (eventType.startsWith('employee.') || eventType.startsWith('user.') || eventType.startsWith('performance.') || eventType.startsWith('recruitment.') || eventType.startsWith('onboarding.') || eventType.startsWith('training.')) return 'people';
   return 'other';
+}
+
+// Who did it, when it wasn't someone in the company.
+export function actorFallback(e: { eventType: string; metadata: unknown }): string {
+  if (e.eventType.startsWith('support.')) {
+    const agent = (e.metadata as { supportAgent?: unknown } | null)?.supportAgent;
+    return `${typeof agent === 'string' ? agent : 'Quscer'} (Quscer support)`;
+  }
+  if (e.eventType === 'recruitment.applied') return 'A candidate';
+  return 'Someone';
 }

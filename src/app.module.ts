@@ -20,6 +20,7 @@ import { TrainingModule } from './training/training.module';
 import { AttendanceDevicesModule } from './attendance-devices/devices.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SupportModule } from './support/support.module';
+import { ActivityModule } from './activity/activity.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { SupportModule } from './support/support.module';
     AttendanceDevicesModule,
     NotificationsModule,
     SupportModule,
+    ActivityModule,
   ],
 })
 export class AppModule {}
