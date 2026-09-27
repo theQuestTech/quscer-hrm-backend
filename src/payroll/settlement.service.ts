@@ -15,6 +15,7 @@ import {
   SettlementStatus,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { BRANCH_JURISDICTION, jurisdictionOf } from '../common/jurisdiction';
 import { StatutoryEngineService } from './statutory-engine.service';
 import { startOfDayUtc } from '../common/dates';
 import { loadWorkCalendar } from '../common/work-calendar';
@@ -184,7 +185,7 @@ export class SettlementService {
   // --- internals ----------------------------------------------------------
 
   private async findEmployee(organizationId: string, employeeId: string) {
-    const employee = await this.prisma.employee.findFirst({ where: { id: employeeId, organizationId } });
+    const employee = await this.prisma.employee.findFirst({ where: { id: employeeId, organizationId }, include: { branch: BRANCH_JURISDICTION } });
     if (!employee) throw new NotFoundException('Employee not found');
     return employee;
   }
@@ -244,15 +245,16 @@ export class SettlementService {
 
     // Normal month's effective tax rate, applied to the settlement's salary.
     let monthlyTaxRate = 0;
-    if (employee.countryCode && taxable > 0) {
+    const { countryCode, regionCode } = jurisdictionOf(employee);
+    if (countryCode && taxable > 0) {
       const tax = await this.statutoryEngine.calculateIncomeTax(
-        employee.countryCode,
-        employee.regionCode ?? undefined,
+        countryCode,
+        regionCode ?? undefined,
         taxable,
         lastWorkingDay,
       );
       monthlyTaxRate = tax ? tax.employeeAmount / taxable : 0;
-    } else if (!employee.countryCode) {
+    } else if (!countryCode) {
       warnings.push('No country set on this employee, so no income tax was worked out.');
     }
 

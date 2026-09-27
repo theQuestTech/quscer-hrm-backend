@@ -13,6 +13,7 @@ import { BankFileRow, toBankCsv } from './bank-file';
 import { FieldEncryptionService } from '../crypto/field-encryption.service';
 import { createHash } from 'crypto';
 import { loadWorkCalendar } from '../common/work-calendar';
+import { BRANCH_JURISDICTION, jurisdictionOf } from '../common/jurisdiction';
 import { requireEmployeeForUser } from '../common/current-employee';
 import { NotifyService } from '../notifications/notify.service';
 
@@ -122,6 +123,7 @@ export class PayrollService {
     const employees = await this.prisma.employee.findMany({
       where: { organizationId, status: EmployeeStatus.ACTIVE },
       include: {
+        branch: BRANCH_JURISDICTION,
         salaryStructure: { include: { components: { include: { component: true } } } },
         // Only loans that have started by the end of this period.
         loans: { where: { status: 'ACTIVE', startDate: { lte: run.periodEnd } } },
@@ -191,7 +193,8 @@ export class PayrollService {
         skippedNoSalaryStructure.push(employee.id);
         continue;
       }
-      if (!employee.countryCode) {
+      const { countryCode, regionCode } = jurisdictionOf(employee);
+      if (!countryCode) {
         skippedNoJurisdiction.push(employee.id);
         continue;
       }
@@ -256,17 +259,17 @@ export class PayrollService {
       // Statutory deductions, via the engine — this is the part that's
       // identical code regardless of which country the employee is in.
       const asOf = run.periodStart;
-      const region = employee.regionCode ?? undefined;
-      const coverage = await coverageFor(employee.countryCode, region);
+      const region = regionCode ?? undefined;
+      const coverage = await coverageFor(countryCode, region);
       if (!coverage.hasRules) {
-        const list = noPayrollRules.get(employee.countryCode) ?? [];
+        const list = noPayrollRules.get(countryCode) ?? [];
         list.push(employee.id);
-        noPayrollRules.set(employee.countryCode, list);
+        noPayrollRules.set(countryCode, list);
       }
       if (coverage.regionMissing) missingRegion.push(employee.id);
       for (const type of coverage.notCovered) flagNotCovered(type, region!, employee.id);
       const incomeTax = await this.statutoryEngine.calculateIncomeTax(
-        employee.countryCode, employee.regionCode ?? undefined, taxableIncome, asOf,
+        countryCode, region, taxableIncome, asOf,
       );
       if (incomeTax && incomeTax.employeeAmount > 0) {
         totalDeductions += incomeTax.employeeAmount;
@@ -280,7 +283,7 @@ export class PayrollService {
       // minimum wage for it) it can't be, so flag it rather than fail the run.
       let pension: Awaited<ReturnType<StatutoryEngineService['calculatePensionFund']>> = null;
       try {
-        pension = await this.statutoryEngine.calculatePensionFund(employee.countryCode, region, undefined, asOf);
+        pension = await this.statutoryEngine.calculatePensionFund(countryCode, region, undefined, asOf);
       } catch (e) {
         if (!(e instanceof BadRequestException)) throw e;
         if (region) flagNotCovered('PENSION_FUND', region, employee.id);
@@ -303,7 +306,7 @@ export class PayrollService {
       }
 
       const socialSecurity = await this.statutoryEngine.calculateSocialSecurity(
-        employee.countryCode, employee.regionCode ?? undefined, grossSalary - unpaidAmount, asOf,
+        countryCode, region, grossSalary - unpaidAmount, asOf,
       );
       if (socialSecurity) {
         if (socialSecurity.employeeAmount > 0) {
