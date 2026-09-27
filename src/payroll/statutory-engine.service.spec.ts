@@ -1,4 +1,4 @@
-import { StatutoryEngineService } from './statutory-engine.service';
+import { StatutoryEngineService, coverageOf } from './statutory-engine.service';
 
 // A fake Prisma that returns the given rules for any findMany — enough to
 // test the engine's arithmetic and rule selection without a database.
@@ -73,5 +73,37 @@ describe('StatutoryEngineService', () => {
     const result = await engineWithRules(rules).calculatePensionFund('PK', 'PB', undefined, asOf);
     expect(result!.employeeAmount).toBe(400);
     expect(result!.employerAmount).toBe(2000);
+  });
+});
+
+describe('coverageOf', () => {
+  const pk = [
+    { ruleType: 'INCOME_TAX', regionCode: null },
+    { ruleType: 'PENSION_FUND', regionCode: null },
+    { ruleType: 'MINIMUM_WAGE', regionCode: 'PB' },
+    { ruleType: 'MINIMUM_WAGE', regionCode: 'ICT' },
+    { ruleType: 'SOCIAL_SECURITY', regionCode: 'PB' },
+    { ruleType: 'SOCIAL_SECURITY', regionCode: 'SD' },
+  ] as any[];
+
+  it('flags a country with no rules at all', () => {
+    expect(coverageOf([], 'XX')).toEqual({ hasRules: false, regionMissing: false, notCovered: [] });
+  });
+
+  it('flags a missing region when rules depend on one', () => {
+    expect(coverageOf(pk, undefined)).toEqual({ hasRules: true, regionMissing: true, notCovered: [] });
+  });
+
+  it('does not ask for a region when every rule is national', () => {
+    const national = [{ ruleType: 'INCOME_TAX', regionCode: null }] as any[];
+    expect(coverageOf(national, undefined).regionMissing).toBe(false);
+  });
+
+  it('is fully covered in a region with its own scheme', () => {
+    expect(coverageOf(pk, 'PB')).toEqual({ hasRules: true, regionMissing: false, notCovered: [] });
+  });
+
+  it('notes a regional scheme the region does not have', () => {
+    expect(coverageOf(pk, 'ICT').notCovered).toEqual(['SOCIAL_SECURITY']);
   });
 });

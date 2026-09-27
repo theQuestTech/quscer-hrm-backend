@@ -10,6 +10,37 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StatutoryRuleType } from '@prisma/client';
 
+// What payroll can work out for someone in a given country/region. Lets a
+// run flag people instead of silently charging nothing (a country with no
+// rules yet) or failing outright (a region-dependent rule, no region given).
+export interface Coverage {
+  hasRules: boolean; // this country has any payroll rules at all
+  regionMissing: boolean; // rules here depend on a region, and none was given
+  notCovered: StatutoryRuleType[]; // rule types other regions have but this one doesn't
+}
+
+// Rule types that are charged (not inputs like the minimum wage).
+const CHARGED: StatutoryRuleType[] = [
+  StatutoryRuleType.INCOME_TAX,
+  StatutoryRuleType.PENSION_FUND,
+  StatutoryRuleType.SOCIAL_SECURITY,
+];
+
+export function coverageOf(
+  rules: { ruleType: StatutoryRuleType; regionCode: string | null }[],
+  regionCode: string | undefined,
+): Coverage {
+  if (!rules.length) return { hasRules: false, regionMissing: false, notCovered: [] };
+  const regional = rules.filter((r) => r.regionCode !== null);
+  if (!regionCode) return { hasRules: true, regionMissing: regional.length > 0, notCovered: [] };
+  const notCovered = CHARGED.filter((type) => {
+    const ofType = rules.filter((r) => r.ruleType === type);
+    const regionalOnly = ofType.length > 0 && ofType.every((r) => r.regionCode !== null);
+    return regionalOnly && !ofType.some((r) => r.regionCode === regionCode);
+  });
+  return { hasRules: true, regionMissing: false, notCovered };
+}
+
 export interface StatutoryDeductionResult {
   label: string;
   ruleId: string;
@@ -20,6 +51,18 @@ export interface StatutoryDeductionResult {
 @Injectable()
 export class StatutoryEngineService {
   constructor(private prisma: PrismaService) {}
+
+  async coverage(countryCode: string, regionCode: string | undefined, asOf: Date): Promise<Coverage> {
+    const rules = await this.prisma.statutoryRule.findMany({
+      where: {
+        countryCode,
+        effectiveFrom: { lte: asOf },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gte: asOf } }],
+      },
+      select: { ruleType: true, regionCode: true },
+    });
+    return coverageOf(rules, regionCode);
+  }
 
   // Finds the single rule that applies for a (country, region, type, date).
   // Region-specific rules win over national ones when both exist and match

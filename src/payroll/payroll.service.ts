@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { StatutoryEngineService } from './statutory-engine.service';
+import { Coverage, StatutoryEngineService } from './statutory-engine.service';
 import { AttendanceStatus, EmployeeStatus, LeaveRequestStatus, PayrollRunStatus } from '@prisma/client';
 import { eachDay, startOfDayUtc } from '../common/dates';
 import { computeUnpaidDays } from './unpaid-days';
@@ -168,6 +168,23 @@ export class PayrollService {
     const skippedNoJurisdiction: string[] = [];
     const negativeNetPay: string[] = [];
     const skippedNotYetJoined: string[] = [];
+    // Coverage: people payroll could only partly work out, so HR knows
+    // before approving (nothing here stops the run).
+    const missingRegion: string[] = [];
+    const noPayrollRules = new Map<string, string[]>(); // country → employees
+    const notCovered = new Map<string, { ruleType: string; regionCode: string; employeeIds: string[] }>();
+    const coverageCache = new Map<string, Promise<Coverage>>();
+    const coverageFor = (countryCode: string, regionCode: string | undefined) => {
+      const key = `${countryCode}/${regionCode ?? ''}`;
+      if (!coverageCache.has(key)) coverageCache.set(key, this.statutoryEngine.coverage(countryCode, regionCode, run.periodStart));
+      return coverageCache.get(key)!;
+    };
+    const flagNotCovered = (ruleType: string, regionCode: string, employeeId: string) => {
+      const key = `${ruleType}/${regionCode}`;
+      if (!notCovered.has(key)) notCovered.set(key, { ruleType, regionCode, employeeIds: [] });
+      const list = notCovered.get(key)!.employeeIds;
+      if (!list.includes(employeeId)) list.push(employeeId);
+    };
 
     for (const employee of employees) {
       if (!employee.salaryStructure) {
@@ -239,6 +256,15 @@ export class PayrollService {
       // Statutory deductions, via the engine — this is the part that's
       // identical code regardless of which country the employee is in.
       const asOf = run.periodStart;
+      const region = employee.regionCode ?? undefined;
+      const coverage = await coverageFor(employee.countryCode, region);
+      if (!coverage.hasRules) {
+        const list = noPayrollRules.get(employee.countryCode) ?? [];
+        list.push(employee.id);
+        noPayrollRules.set(employee.countryCode, list);
+      }
+      if (coverage.regionMissing) missingRegion.push(employee.id);
+      for (const type of coverage.notCovered) flagNotCovered(type, region!, employee.id);
       const incomeTax = await this.statutoryEngine.calculateIncomeTax(
         employee.countryCode, employee.regionCode ?? undefined, taxableIncome, asOf,
       );
@@ -250,9 +276,16 @@ export class PayrollService {
         });
       }
 
-      const pension = await this.statutoryEngine.calculatePensionFund(
-        employee.countryCode, employee.regionCode ?? undefined, undefined, asOf,
-      );
+      // Worked out from the region's minimum wage: without a region (or a
+      // minimum wage for it) it can't be, so flag it rather than fail the run.
+      let pension: Awaited<ReturnType<StatutoryEngineService['calculatePensionFund']>> = null;
+      try {
+        pension = await this.statutoryEngine.calculatePensionFund(employee.countryCode, region, undefined, asOf);
+      } catch (e) {
+        if (!(e instanceof BadRequestException)) throw e;
+        if (region) flagNotCovered('PENSION_FUND', region, employee.id);
+        else if (!missingRegion.includes(employee.id)) missingRegion.push(employee.id);
+      }
       if (pension) {
         if (pension.employeeAmount > 0) {
           totalDeductions += pension.employeeAmount;
@@ -332,6 +365,9 @@ export class PayrollService {
         skippedNoJurisdiction,
         skippedNotYetJoined,
         negativeNetPay,
+        missingRegion,
+        noPayrollRules: [...noPayrollRules].map(([countryCode, employeeIds]) => ({ countryCode, employeeIds })),
+        notCovered: [...notCovered.values()],
       },
     };
   }
