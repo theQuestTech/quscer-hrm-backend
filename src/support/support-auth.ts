@@ -158,6 +158,19 @@ export class SupportAuthService implements OnModuleInit {
     return { id: agent.id, emailSent: this.mailer.enabled };
   }
 
+  // Anyone can change their own name; the owner can change anyone's.
+  async rename(caller: SupportCaller, agentId: string, name: string) {
+    if (agentId !== caller.agentId) this.ownerOnly(caller);
+    const agent = await this.prisma.supportAgent.findUnique({ where: { id: agentId } });
+    if (!agent) throw new BadRequestException('Not found');
+    if (agent.name === name) return { ok: true };
+    await this.prisma.supportAgent.update({ where: { id: agentId }, data: { name } });
+    await this.prisma.supportAction.create({
+      data: { agentId: caller.agentId, action: 'agent.renamed', detail: { email: agent.email, from: agent.name, to: name } },
+    });
+    return { ok: true };
+  }
+
   async setActive(caller: SupportCaller, agentId: string, isActive: boolean) {
     this.ownerOnly(caller);
     if (agentId === caller.agentId) throw new BadRequestException("You can't switch off your own account");

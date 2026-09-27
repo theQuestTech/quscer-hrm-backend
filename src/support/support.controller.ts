@@ -143,8 +143,9 @@ export class SupportController {
   }
 
   @Patch('team/:id')
-  updateAgent(@Req() req: any, @Param('id') id: string, @Body() dto: UpdateAgentDto) {
-    if (dto.isActive === undefined) return { ok: true };
-    return this.auth.setActive(req.agent, id, dto.isActive);
+  async updateAgent(@Req() req: any, @Param('id') id: string, @Body() dto: UpdateAgentDto) {
+    if (dto.name !== undefined) await this.auth.rename(req.agent, id, dto.name);
+    if (dto.isActive !== undefined) await this.auth.setActive(req.agent, id, dto.isActive);
+    return { ok: true };
   }
 }

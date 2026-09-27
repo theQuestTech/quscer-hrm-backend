@@ -27,6 +27,8 @@ export class AddAgentDto {
 
 export class UpdateAgentDto {
   @IsOptional() @IsBoolean() isActive?: boolean;
+  // The name customers see, e.g. "Ali (Quscer support)".
+  @IsOptional() @Transform(trim) @IsString() @MinLength(2) @MaxLength(100) name?: string;
 }
 
 // --- Console actions ------------------------------------------------------------
