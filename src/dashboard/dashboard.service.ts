@@ -14,7 +14,7 @@ import { findEmployeeForUser } from '../common/current-employee';
 import { findActiveMembership } from '../common/membership';
 import { approverScope } from '../common/approver-scope';
 import { dayKey, todayInTimeZone } from '../common/dates';
-import { activityKind, activityPhrase } from './activity';
+import { activityKind, activityPhrase, actorFallback } from './activity';
 import { countToday, todayStatus, TodayStatus } from './today-status';
 
 type Caller = { id: string; organizationId: string; permissions?: string[] };
@@ -328,7 +328,7 @@ export class DashboardService {
       const actor = actors.find((a) => a.id === e.actorUserId);
       lines.push({
         kind: activityKind(e.eventType),
-        text: `${actor ? `${actor.firstName} ${actor.lastName}` : e.eventType === 'recruitment.applied' ? 'A candidate' : 'Someone'} ${activityPhrase(e.eventType)}`,
+        text: `${actor ? `${actor.firstName} ${actor.lastName}` : actorFallback(e)} ${activityPhrase(e.eventType).replace('{subject}', 'a user')}`,
         at: e.createdAt,
         key,
         count: 1,
