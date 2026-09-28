@@ -9,6 +9,7 @@ import {
   IsString,
   MinLength,
 } from 'class-validator';
+import { IsCountryCode, IsRegionCode } from '../../common/geo';
 import { EmployeeStatus, EmploymentType } from '@prisma/client';
 import { PersonalDetailsDto } from './personal-details.dto';
 
@@ -72,13 +73,14 @@ export class CreateEmployeeDto extends PersonalDetailsDto {
   @IsString()
   shiftId?: string;
 
+  // Where their tax is worked out. Left out (or null) = follow their branch.
   @IsOptional()
-  @IsString()
-  countryCode?: string;
+  @IsCountryCode()
+  countryCode?: string | null;
 
   @IsOptional()
-  @IsString()
-  regionCode?: string;
+  @IsRegionCode()
+  regionCode?: string | null;
 
   // Attendance: their number on the attendance machine, and their own
   // check-in rules (null = company default).

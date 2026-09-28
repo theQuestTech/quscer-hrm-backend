@@ -92,21 +92,12 @@ export class EmployeesService {
     actorUserId: string,
     dto: CreateEmployeeDto,
   ) {
-    // If no countryCode/regionCode given, inherit from the branch — the
-    // Phase 4 payroll engine needs SOME jurisdiction to key StatutoryRule
-    // lookups against, so don't leave this silently null when a branch
-    // already has the answer.
+    // No countryCode/regionCode means "follow the branch": payroll reads the
+    // branch's at run time (see common/jurisdiction.ts), so a later branch
+    // change is picked up. A region only counts with its country.
     await this.assertRefsInOrg(organizationId, dto);
-
-    let countryCode = dto.countryCode;
-    let regionCode = dto.regionCode;
-    if (!countryCode && dto.branchId) {
-      const branch = await this.prisma.branch.findUnique({
-        where: { id: dto.branchId },
-      });
-      countryCode = countryCode ?? branch?.countryCode;
-      regionCode = regionCode ?? branch?.regionCode ?? undefined;
-    }
+    const countryCode = dto.countryCode ?? undefined;
+    const regionCode = countryCode ? (dto.regionCode ?? undefined) : undefined;
 
     let employee;
     try {

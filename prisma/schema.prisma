@@ -31,16 +31,17 @@ model Organization {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  users          User[]
-  memberships    Membership[]
-  branches       Branch[]
-  roles          Role[]
-  auditEvents    AuditEvent[]
-  employees      Employee[]
-  localeSettings OrganizationLocaleSettings?
-  holidays       Holiday[]
-  supportTickets SupportTicket[]
-  supportActions SupportAction[]
+  users             User[]
+  memberships       Membership[]
+  branches          Branch[]
+  roles             Role[]
+  auditEvents       AuditEvent[]
+  employees         Employee[]
+  localeSettings    OrganizationLocaleSettings?
+  holidays          Holiday[]
+  supportTickets    SupportTicket[]
+  supportActions    SupportAction[]
+  payrollDeductions CompanyDeduction[]
 
   @@index([quscerOrgId])
 }
@@ -310,6 +311,50 @@ model StatutoryRule {
   createdAt     DateTime          @default(now())
 
   @@index([countryCode, regionCode, ruleType, effectiveFrom])
+}
+
+// ----------------------------------------------------------------------------
+// Deductions a company sets up itself: for countries without built-in rules,
+// or its own schemes on top (e.g. a company provident fund). Payroll applies
+// them after the built-in statutory rules; see payroll/company-deductions.ts.
+// ----------------------------------------------------------------------------
+enum CompanyDeductionMethod {
+  PERCENT_OF_BASIC
+  PERCENT_OF_GROSS
+  FIXED_AMOUNT
+  TAX_SLABS // yearly bands on taxable pay, employee only
+}
+
+model CompanyDeduction {
+  id                String                 @id @default(cuid())
+  organizationId    String
+  name              String // shown on the payslip
+  countryCode       String? // null = every country
+  regionCode        String? // null = the whole country
+  method            CompanyDeductionMethod
+  employeePercent   Decimal? // 11 = 11%
+  employerPercent   Decimal?
+  employeeAmount    Decimal? // FIXED_AMOUNT, per month
+  employerAmount    Decimal?
+  wageCap           Decimal? // percent methods: only salary up to this per month counts
+  // TAX_SLABS: [{ upTo: number | null, ratePercent: number }] on YEARLY
+  // taxable pay, lowest band first; the last band has upTo null.
+  slabs             Json?
+  // Amounts, caps and bands are in this currency; people paid in another
+  // currency are skipped and listed in the payroll warnings.
+  currency          String?
+  appliesToAll      Boolean                @default(true)
+  employeeIds       String[] // when appliesToAll is false
+  reducesTaxablePay Boolean                @default(false) // the employee's part is taken off pay before income tax
+  effectiveFrom     DateTime // first day of the first month
+  effectiveTo       DateTime? // first day of the last month; null = no end
+  sourceRef         String? // where the rule comes from
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
 }
 
 // ============================================================================

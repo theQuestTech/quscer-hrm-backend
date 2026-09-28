@@ -17,6 +17,8 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { BRANCH_JURISDICTION, jurisdictionOf } from '../common/jurisdiction';
 import { StatutoryEngineService } from './statutory-engine.service';
+import { CompanyDeductionsService } from './company-deductions.service';
+import { appliesTo, currencyMismatch, slabTax } from './company-deductions';
 import { startOfDayUtc } from '../common/dates';
 import { loadWorkCalendar } from '../common/work-calendar';
 import { allocationForYear } from '../leave/entitlement';
@@ -32,6 +34,7 @@ export class SettlementService {
   constructor(
     private prisma: PrismaService,
     private statutoryEngine: StatutoryEngineService,
+    private companyDeductions: CompanyDeductionsService,
   ) {}
 
   async get(organizationId: string, employeeId: string) {
@@ -254,6 +257,13 @@ export class SettlementService {
         lastWorkingDay,
       );
       monthlyTaxRate = tax ? tax.employeeAmount / taxable : 0;
+      // Plus any tax bands the company set up itself (Settings → Payroll deductions).
+      const person = { employeeId: employee.id, countryCode, regionCode, currency: structure.currency };
+      const month = new Date(Date.UTC(lastWorkingDay.getUTCFullYear(), lastWorkingDay.getUTCMonth(), 1));
+      for (const d of await this.companyDeductions.forPayroll(organizationId)) {
+        if (d.method !== 'TAX_SLABS' || !appliesTo(d, person, month) || currencyMismatch(d, person)) continue;
+        monthlyTaxRate += slabTax(d.slabs ?? [], taxable) / taxable;
+      }
     } else if (!countryCode) {
       warnings.push('No country set on this employee, so no income tax was worked out.');
     }

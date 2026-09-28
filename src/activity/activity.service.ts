@@ -23,6 +23,14 @@ const PAGE = 50;
 const CSV_LIMIT = 10_000;
 const MONTH = new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 const DAY = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+const COUNTRY = new Intl.DisplayNames(['en'], { type: 'region' });
+const countryName = (code: string) => {
+  try {
+    return COUNTRY.of(code) ?? code;
+  } catch {
+    return code;
+  }
+};
 
 @Injectable()
 export class ActivityService {
@@ -253,6 +261,11 @@ export class ActivityService {
           break;
         case 'PerformanceReview':
           subject = person(maps.review.get(e.entityId)?.employeeId ?? meta.employeeId);
+          break;
+        case 'CompanyDeduction':
+          // The name is kept in the event, so it still reads right after the deduction is removed.
+          if (meta.name) subject = { label: String(meta.name), href: '/settings?tab=deductions' };
+          if (meta.countryCode) detail = countryName(String(meta.countryCode));
           break;
       }
       if (e.eventType === 'user.roles_changed' || e.eventType === 'user.added') {
