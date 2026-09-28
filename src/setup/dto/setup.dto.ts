@@ -12,13 +12,14 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { IsCountryCode, IsRegionCode, IsTimeZone } from '../../common/geo';
 import { PartialType } from '@nestjs/mapped-types';
 
 export class UpdateOrganizationSettingsDto {
   @IsOptional() @IsString() @MinLength(2) name?: string;
-  @IsOptional() @IsString() @Matches(/^[A-Z]{2}$/) defaultCountryCode?: string;
+  @IsOptional() @IsCountryCode() defaultCountryCode?: string;
   @IsOptional() @IsString() @Matches(/^[A-Z]{3}$/) defaultCurrency?: string;
-  @IsOptional() @IsString() defaultTimezone?: string;
+  @IsOptional() @IsTimeZone() defaultTimezone?: string;
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(6)
@@ -52,9 +53,9 @@ export class UpdateOrganizationSettingsDto {
 
 export class CreateBranchDto {
   @IsString() @MinLength(1) name: string;
-  @IsString() @Matches(/^[A-Z]{2}$/) countryCode: string;
-  @IsOptional() @IsString() regionCode?: string;
-  @IsString() timezone: string;
+  @IsCountryCode() countryCode: string;
+  @IsOptional() @IsRegionCode() regionCode?: string | null; // null clears it on edit
+  @IsTimeZone() timezone: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 export class UpdateBranchDto extends PartialType(CreateBranchDto) {}

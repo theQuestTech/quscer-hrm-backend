@@ -174,16 +174,16 @@ export class PayrollService {
     // before approving (nothing here stops the run).
     const missingRegion: string[] = [];
     const noPayrollRules = new Map<string, string[]>(); // country → employees
-    const notCovered = new Map<string, { ruleType: string; regionCode: string; employeeIds: string[] }>();
+    const notCovered = new Map<string, { ruleType: string; countryCode: string; regionCode: string; employeeIds: string[] }>();
     const coverageCache = new Map<string, Promise<Coverage>>();
     const coverageFor = (countryCode: string, regionCode: string | undefined) => {
       const key = `${countryCode}/${regionCode ?? ''}`;
       if (!coverageCache.has(key)) coverageCache.set(key, this.statutoryEngine.coverage(countryCode, regionCode, run.periodStart));
       return coverageCache.get(key)!;
     };
-    const flagNotCovered = (ruleType: string, regionCode: string, employeeId: string) => {
-      const key = `${ruleType}/${regionCode}`;
-      if (!notCovered.has(key)) notCovered.set(key, { ruleType, regionCode, employeeIds: [] });
+    const flagNotCovered = (ruleType: string, countryCode: string, regionCode: string, employeeId: string) => {
+      const key = `${ruleType}/${countryCode}/${regionCode}`;
+      if (!notCovered.has(key)) notCovered.set(key, { ruleType, countryCode, regionCode, employeeIds: [] });
       const list = notCovered.get(key)!.employeeIds;
       if (!list.includes(employeeId)) list.push(employeeId);
     };
@@ -267,7 +267,7 @@ export class PayrollService {
         noPayrollRules.set(countryCode, list);
       }
       if (coverage.regionMissing) missingRegion.push(employee.id);
-      for (const type of coverage.notCovered) flagNotCovered(type, region!, employee.id);
+      for (const type of coverage.notCovered) flagNotCovered(type, countryCode, region!, employee.id);
       const incomeTax = await this.statutoryEngine.calculateIncomeTax(
         countryCode, region, taxableIncome, asOf,
       );
@@ -286,7 +286,7 @@ export class PayrollService {
         pension = await this.statutoryEngine.calculatePensionFund(countryCode, region, undefined, asOf);
       } catch (e) {
         if (!(e instanceof BadRequestException)) throw e;
-        if (region) flagNotCovered('PENSION_FUND', region, employee.id);
+        if (region) flagNotCovered('PENSION_FUND', countryCode, region, employee.id);
         else if (!missingRegion.includes(employee.id)) missingRegion.push(employee.id);
       }
       if (pension) {

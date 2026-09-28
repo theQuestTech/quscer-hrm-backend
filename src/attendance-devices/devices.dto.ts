@@ -3,6 +3,7 @@ import {
   ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min,
   MinLength, ValidateNested,
 } from 'class-validator';
+import { IsTimeZone } from '../common/geo';
 import { AttendanceDeviceKind } from '@prisma/client';
 
 export class DeviceDto {
@@ -10,13 +11,13 @@ export class DeviceDto {
   @IsEnum(AttendanceDeviceKind) kind: AttendanceDeviceKind;
   @IsOptional() @IsString() @Matches(/^[A-Za-z0-9_-]{4,40}$/, { message: 'Serial numbers are 4–40 letters and numbers' }) serialNumber?: string;
   @IsOptional() @IsString() branchId?: string | null;
-  @IsOptional() @IsString() @MaxLength(60) timezone?: string | null;
+  @IsOptional() @IsTimeZone() timezone?: string | null;
 }
 
 export class UpdateDeviceDto {
   @IsOptional() @IsString() @MinLength(2) @MaxLength(80) name?: string;
   @IsOptional() @IsString() branchId?: string | null;
-  @IsOptional() @IsString() @MaxLength(60) timezone?: string | null;
+  @IsOptional() @IsTimeZone() timezone?: string | null;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
