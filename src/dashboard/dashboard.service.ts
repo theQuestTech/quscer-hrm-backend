@@ -6,6 +6,7 @@
 // Personal numbers (leave balance, payslips, calendar) come from the
 // existing endpoints the rest of the app already uses.
 
+import { totalsByCurrency } from '../payroll/totals';
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { EmployeeStatus, LeaveRequestStatus, PayrollRunStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -70,12 +71,13 @@ export class DashboardService {
         this.prisma.payrollRun.findFirst({
           where: { organizationId: orgId },
           orderBy: { periodStart: 'desc' },
-          include: { lineItems: { select: { netSalary: true, currency: true } } },
+          include: { lineItems: { select: { netSalary: true, grossSalary: true, totalDeductions: true, currency: true } } },
         }),
         this.companyActivity(orgId),
       ]);
 
     const activeEmployees = overview.counts.total;
+    const runTotals = totalsByCurrency(latestPayrollRun?.lineItems ?? []);
     return {
       today,
       activeEmployees,
@@ -96,8 +98,10 @@ export class DashboardService {
         payDate: latestPayrollRun.payDate,
         status: latestPayrollRun.status,
         employeeCount: latestPayrollRun.lineItems.length,
-        totalNet: latestPayrollRun.lineItems.reduce((s, l) => s + Number(l.netSalary), 0),
-        currency: latestPayrollRun.lineItems[0]?.currency ?? null,
+        // One total per currency; totalNet / currency are the main one, for older screens.
+        totals: runTotals,
+        totalNet: runTotals[0]?.net ?? 0,
+        currency: runTotals[0]?.currency ?? null,
       },
       activity,
     };

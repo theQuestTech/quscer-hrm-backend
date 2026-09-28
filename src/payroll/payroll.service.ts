@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { Coverage, StatutoryEngineService } from './statutory-engine.service';
 import { CompanyDeductionsService } from './company-deductions.service';
+import { totalsByCurrency } from './totals';
 import { appliesTo, contributionLines, currencyMismatch, slabTax } from './company-deductions';
 import { AttendanceStatus, EmployeeStatus, LeaveRequestStatus, PayrollRunStatus } from '@prisma/client';
 import { eachDay, startOfDayUtc } from '../common/dates';
@@ -559,7 +560,7 @@ export class PayrollService {
     await this.audit(organizationId, actorUserId, 'payroll.bank_file_exported', runId, {
       sha256: createHash('sha256').update(csv).digest('hex'),
       payments: rows.length,
-      total: round2(rows.reduce((sum, r) => sum + r.amount, 0)),
+      totals: totalsByCurrency(rows.map((r) => ({ currency: r.currency, netSalary: r.amount }))).map((t) => ({ currency: t.currency, amount: t.net })),
       missingBankDetails,
     });
 
@@ -596,14 +597,19 @@ export class PayrollService {
     const runs = await this.prisma.payrollRun.findMany({
       where: { organizationId },
       orderBy: { periodStart: 'desc' },
-      include: { lineItems: { select: { netSalary: true, currency: true } } },
+      include: { lineItems: { select: { netSalary: true, grossSalary: true, totalDeductions: true, currency: true } } },
     });
-    return runs.map(({ lineItems, ...run }) => ({
-      ...run,
-      employeeCount: lineItems.length,
-      totalNet: round2(lineItems.reduce((sum, li) => sum + Number(li.netSalary), 0)),
-      currency: lineItems[0]?.currency ?? null,
-    }));
+    return runs.map(({ lineItems, ...run }) => {
+      const totals = totalsByCurrency(lineItems);
+      return {
+        ...run,
+        employeeCount: lineItems.length,
+        totals,
+        // Older screens: the main currency only, never a mix.
+        totalNet: totals[0]?.net ?? 0,
+        currency: totals[0]?.currency ?? null,
+      };
+    });
   }
 
   async getSalaryStructure(organizationId: string, employeeId: string) {
