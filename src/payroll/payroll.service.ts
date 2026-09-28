@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Coverage, StatutoryEngineService } from './statutory-engine.service';
+import { CompanyDeductionsService } from './company-deductions.service';
+import { appliesTo, contributionLines, currencyMismatch, slabTax } from './company-deductions';
 import { AttendanceStatus, EmployeeStatus, LeaveRequestStatus, PayrollRunStatus } from '@prisma/client';
 import { eachDay, startOfDayUtc } from '../common/dates';
 import { computeUnpaidDays } from './unpaid-days';
@@ -26,6 +28,7 @@ export class PayrollService {
     private statutoryEngine: StatutoryEngineService,
     private fieldEncryption: FieldEncryptionService,
     private notify: NotifyService,
+    private companyDeductions: CompanyDeductionsService,
   ) {}
 
   // ---------------------------------------------------------------------
@@ -165,6 +168,9 @@ export class PayrollService {
     const periodCalendarDays = eachDay(periodStart, periodEnd).length;
 
     await this.prisma.payrollLineItem.deleteMany({ where: { payrollRunId: runId } });
+    const ownDeductions = await this.companyDeductions.forPayroll(organizationId);
+    // Deductions set up in another currency than someone's salary (amounts, caps or tax bands).
+    const currencyMismatches = new Map<string, { deductionId: string; name: string; employeeIds: string[] }>();
 
     const skippedNoSalaryStructure: string[] = [];
     const skippedNoJurisdiction: string[] = [];
@@ -242,7 +248,7 @@ export class PayrollService {
         });
       }
       // Unpaid days reduce taxable pay in proportion to the taxable share.
-      const taxableIncome = Math.max(
+      let taxableIncome = Math.max(
         0,
         taxableEarnings - (grossSalary > 0 ? unpaidAmount * (taxableEarnings / grossSalary) : 0),
       );
@@ -256,12 +262,42 @@ export class PayrollService {
         }
       }
 
+      // The company's own deductions (Settings → Payroll deductions). Worked
+      // out here so a part that "reduces taxable pay" is off before income
+      // tax; their lines go on the payslip after the statutory ones.
+      const person = { employeeId: employee.id, countryCode, regionCode, currency: employee.salaryStructure.currency };
+      const own = ownDeductions.filter((d) => appliesTo(d, person, run.periodStart));
+      const ownLines: { label: string; type: string; amount: number; sourceRef: string }[] = [];
+      const ownTaxes: typeof own = [];
+      for (const d of own) {
+        if (currencyMismatch(d, person)) {
+          const entry = currencyMismatches.get(d.id) ?? { deductionId: d.id, name: d.name, employeeIds: [] };
+          entry.employeeIds.push(employee.id);
+          currencyMismatches.set(d.id, entry);
+          continue;
+        }
+        if (d.method === 'TAX_SLABS') {
+          ownTaxes.push(d);
+          continue;
+        }
+        const paidShare = grossSalary > 0 ? (grossSalary - unpaidAmount) / grossSalary : 0;
+        for (const line of contributionLines(d, { basic: basic * paidShare, gross: grossSalary - unpaidAmount })) {
+          ownLines.push(line);
+          if (line.type === 'deduction') {
+            totalDeductions += line.amount;
+            if (d.reducesTaxablePay) taxableIncome = Math.max(0, taxableIncome - line.amount);
+          }
+        }
+      }
+      // Their own rules for this country count as payroll rules for it.
+      const hasOwnRules = own.some((d) => d.countryCode === countryCode);
+
       // Statutory deductions, via the engine — this is the part that's
       // identical code regardless of which country the employee is in.
       const asOf = run.periodStart;
       const region = regionCode ?? undefined;
       const coverage = await coverageFor(countryCode, region);
-      if (!coverage.hasRules) {
+      if (!coverage.hasRules && !hasOwnRules) {
         const list = noPayrollRules.get(countryCode) ?? [];
         list.push(employee.id);
         noPayrollRules.set(countryCode, list);
@@ -324,6 +360,15 @@ export class PayrollService {
         }
       }
 
+      for (const d of ownTaxes) {
+        const tax = slabTax(d.slabs ?? [], taxableIncome);
+        if (tax > 0) {
+          totalDeductions += tax;
+          ownLines.push({ label: d.name, type: 'deduction', amount: tax, sourceRef: d.id });
+        }
+      }
+      breakdown.push(...ownLines);
+
       // Loan deductions — WBS 4.12. Capped at remaining balance so the
       // last installment doesn't overshoot. Balance is only decremented on
       // APPROVAL (see approve() below), not here — draft calculation must
@@ -371,6 +416,7 @@ export class PayrollService {
         missingRegion,
         noPayrollRules: [...noPayrollRules].map(([countryCode, employeeIds]) => ({ countryCode, employeeIds })),
         notCovered: [...notCovered.values()],
+        currencyMismatch: [...currencyMismatches.values()],
       },
     };
   }
