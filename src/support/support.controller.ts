@@ -1,16 +1,18 @@
-import { Body, Controller, Get, HttpCode, HttpException, HttpStatus, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, HttpException, HttpStatus, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { RateLimiter } from '../recruitment/recruitment-rules';
 import { visitorAddress } from '../common/visitor-address';
 import { SupportAuthService, SupportGuard } from './support-auth';
 import { SupportService } from './support.service';
+import { SupportTwoStepService } from './support-two-step';
 import { TicketsService } from './tickets.service';
 import {
-  AddAgentDto, AgentReplyDto, SupportForgotDto, SupportLoginDto, SupportResetDto, SuspendDto, TicketStatusDto, UpdateAgentDto, ViewAsDto,
+  AddAgentDto, AgentReplyDto, SupportForgotDto, SupportLoginDto, SupportLoginTwoStepDto, SupportResetDto, SupportTwoStepConfirmDto, SuspendDto, TicketStatusDto, UpdateAgentDto, ViewAsDto,
 } from './dto';
 
 const signInPerVisitor = new RateLimiter(20, 15 * 60 * 1000);
 const signInPerEmail = new RateLimiter(8, 15 * 60 * 1000);
+const codeConfirmTries = new RateLimiter(10, 15 * 60 * 1000);
 const tooMany = () => new HttpException('Too many tries — please wait a while and try again', HttpStatus.TOO_MANY_REQUESTS);
 
 // Signing in to the console (no support token yet).
@@ -23,6 +25,13 @@ export class SupportAuthController {
   login(@Req() req: Request, @Body() dto: SupportLoginDto) {
     if (!signInPerVisitor.allow(visitorAddress(req)) || !signInPerEmail.allow(dto.email.trim().toLowerCase())) throw tooMany();
     return this.auth.login(dto.email, dto.password);
+  }
+
+  @Post('login/two-step')
+  @HttpCode(200)
+  loginTwoStep(@Req() req: Request, @Body() dto: SupportLoginTwoStepDto) {
+    if (!signInPerVisitor.allow(visitorAddress(req))) throw tooMany();
+    return this.auth.loginTwoStep(dto.challengeToken, dto.code, dto.backupCode);
   }
 
   @Post('forgot-password')
@@ -49,11 +58,38 @@ export class SupportController {
     private auth: SupportAuthService,
     private support: SupportService,
     private tickets: TicketsService,
+    private twoStep: SupportTwoStepService,
   ) {}
 
   @Get('auth/me')
   me(@Req() req: any) {
     return this.auth.me(req.agent);
+  }
+
+  // --- Your two-step sign-in (always required for support staff) ---------------------
+
+  @Get('two-step')
+  twoStepStatus(@Req() req: any) {
+    return this.twoStep.status(req.agent.agentId);
+  }
+
+  @Post('two-step/setup')
+  @HttpCode(200)
+  twoStepSetup(@Req() req: any) {
+    return this.twoStep.startSetup(req.agent.agentId);
+  }
+
+  @Post('two-step/confirm')
+  @HttpCode(200)
+  twoStepConfirm(@Req() req: any, @Body() dto: SupportTwoStepConfirmDto) {
+    if (!codeConfirmTries.allow(req.agent.agentId)) throw tooMany();
+    return this.twoStep.confirmSetup(req.agent.agentId, dto.code);
+  }
+
+  @Post('two-step/backup-codes')
+  @HttpCode(200)
+  twoStepBackupCodes(@Req() req: any, @Headers('x-two-step-code') code?: string) {
+    return this.twoStep.regenerateBackupCodes(req.agent.agentId, code);
   }
 
   @Get('overview')
@@ -140,6 +176,13 @@ export class SupportController {
   @Post('team')
   addAgent(@Req() req: any, @Body() dto: AddAgentDto) {
     return this.auth.addAgent(req.agent, dto.email, dto.name);
+  }
+
+  // For a lost phone with no backup codes: they set it up again on their next visit.
+  @Post('team/:id/reset-two-step')
+  @HttpCode(200)
+  resetTwoStep(@Req() req: any, @Param('id') id: string, @Headers('x-two-step-code') code?: string) {
+    return this.twoStep.reset(req.agent, id, code);
   }
 
   @Patch('team/:id')

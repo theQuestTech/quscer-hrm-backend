@@ -128,12 +128,21 @@ export class TwoStepService {
     return { removed: res.count };
   }
 
-  /** Others in the company who hold a permission — for "a different person must approve". */
+  /** Others in the company who hold a permission — for "a different person must approve".
+   *  One query, same rule as RbacService.getEffectivePermissions (an active member with
+   *  a role in this company that carries the permission). */
   async othersWithPermission(organizationId: string, userId: string, permission: string) {
-    const members = await this.prisma.membership.findMany({ where: { organizationId, isActive: true, userId: { not: userId }, user: { isActive: true } }, select: { userId: true } });
-    const out: string[] = [];
-    for (const m of members) if ((await this.rbac.getEffectivePermissions(m.userId, organizationId)).has(permission)) out.push(m.userId);
-    return out;
+    const rows = await this.prisma.userRoleAssignment.findMany({
+      where: {
+        organizationId,
+        userId: { not: userId },
+        user: { isActive: true, memberships: { some: { organizationId, isActive: true } } },
+        role: { permissions: { some: { permission: { key: permission } } } },
+      },
+      select: { userId: true },
+      distinct: ['userId'],
+    });
+    return rows.map((r) => r.userId);
   }
 
   /** Maker-checker: whoever prepared something can't also approve it — unless

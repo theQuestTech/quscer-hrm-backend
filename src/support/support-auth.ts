@@ -19,22 +19,30 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { Mailer } from '../auth/mailer';
 import { appUrl, hashToken, newToken } from '../auth/password-reset';
 import { renderEmail } from '../notifications/email-layout';
+import { AttemptCounter } from '../two-step/attempt-counter';
+import { SupportTwoStepService } from './support-two-step';
 
 export const SUPPORT_JWT = 'SUPPORT_JWT';
 const SALT_ROUNDS = 12;
 const LINK_MINUTES = 60;
 const NEW_AGENT_LINK_MINUTES = 3 * 24 * 60;
+// Until two-step sign-in is set up, only its setup (and "who am I") works. Read from
+// the account on every request, so an owner's reset applies straight away.
+const TWO_STEP_SETUP_PATHS = ['/support/two-step', '/support/auth/me'];
+// Five code tries per sign-in (the password step has its own limits).
+const codeTries = new AttemptCounter(5, 10 * 60_000);
 
 export interface SupportCaller {
   agentId: string;
   isOwner: boolean;
   name: string;
   email: string;
+  twoStepOn: boolean;
 }
 
 export function supportSecret(): string {
@@ -70,7 +78,13 @@ export class SupportGuard implements CanActivate {
     if (payload.typ !== 'support' || !payload.sub) throw new UnauthorizedException('Please sign in');
     const agent = await this.prisma.supportAgent.findUnique({ where: { id: payload.sub } });
     if (!agent?.isActive) throw new UnauthorizedException('This support account is switched off');
-    request.agent = { agentId: agent.id, isOwner: agent.isOwner, name: agent.name, email: agent.email } satisfies SupportCaller;
+    if (!agent.totpEnabledAt) {
+      const path: string = request.path ?? request.url ?? '';
+      if (!TWO_STEP_SETUP_PATHS.some((p) => path.startsWith(p))) {
+        throw new ForbiddenException({ code: 'TWO_STEP_SETUP_REQUIRED', message: 'Set up two-step sign-in to continue' });
+      }
+    }
+    request.agent = { agentId: agent.id, isOwner: agent.isOwner, name: agent.name, email: agent.email, twoStepOn: !!agent.totpEnabledAt } satisfies SupportCaller;
     return true;
   }
 }
@@ -84,6 +98,7 @@ export class SupportAuthService implements OnModuleInit {
     @Inject(SUPPORT_JWT) private jwt: JwtService,
     private prisma: PrismaService,
     private mailer: Mailer,
+    private twoStep: SupportTwoStepService,
   ) {}
 
   // Makes sure SUPPORT_OWNER_EMAIL has an owner account.
@@ -107,12 +122,47 @@ export class SupportAuthService implements OnModuleInit {
     this.dummyHash ??= await bcrypt.hash('not-a-password', SALT_ROUNDS);
     const ok = await bcrypt.compare(password, agent?.passwordHash ?? this.dummyHash);
     if (!agent?.isActive || !agent.passwordHash || !ok) throw new UnauthorizedException('Wrong email or password');
-    await this.prisma.supportAgent.update({ where: { id: agent.id }, data: { lastLoginAt: new Date() } });
-    return { accessToken: await this.jwt.signAsync({ sub: agent.id, typ: 'support' }) };
+    if (agent.totpEnabledAt) {
+      // Password was right; now the code. The challenge can't open the console (the
+      // guard only takes typ "support") and lasts five minutes.
+      const challengeToken = await this.jwt.signAsync({ sub: agent.id, typ: 'support-challenge', jti: randomBytes(12).toString('hex') }, { expiresIn: '5m' });
+      return { twoStepRequired: true as const, challengeToken };
+    }
+    // Not set up yet: signed in, but the console only opens the setup screen.
+    return { ...(await this.session(agent.id)), setupRequired: true };
+  }
+
+  async loginTwoStep(challengeToken: string, code?: string, backupCode?: string) {
+    let challenge: { sub?: string; typ?: string; jti?: string };
+    try {
+      challenge = await this.jwt.verifyAsync(challengeToken);
+    } catch {
+      throw new UnauthorizedException('That sign-in took too long — enter your password again');
+    }
+    if (challenge.typ !== 'support-challenge' || !challenge.sub || !challenge.jti) throw new UnauthorizedException('Please sign in again');
+    if (!codeTries.allow(challenge.jti)) throw new UnauthorizedException('Too many wrong codes — enter your password again');
+    if (backupCode) {
+      if (!(await this.twoStep.useBackupCode(challenge.sub, backupCode))) throw new UnauthorizedException("That backup code isn't right or was already used");
+    } else {
+      try {
+        await this.twoStep.checkCode(challenge.sub, code);
+      } catch {
+        throw new UnauthorizedException("That code isn't right — check the app and try the newest code");
+      }
+    }
+    codeTries.forget(challenge.jti);
+    const agent = await this.prisma.supportAgent.findUnique({ where: { id: challenge.sub } });
+    if (!agent?.isActive) throw new UnauthorizedException('This support account is switched off');
+    return this.session(agent.id);
+  }
+
+  private async session(agentId: string) {
+    await this.prisma.supportAgent.update({ where: { id: agentId }, data: { lastLoginAt: new Date() } });
+    return { accessToken: await this.jwt.signAsync({ sub: agentId, typ: 'support' }) };
   }
 
   me(caller: SupportCaller) {
-    return { id: caller.agentId, name: caller.name, email: caller.email, isOwner: caller.isOwner };
+    return { id: caller.agentId, name: caller.name, email: caller.email, isOwner: caller.isOwner, twoStepOn: caller.twoStepOn };
   }
 
   // Same answer whether or not the email is a support account.
@@ -142,8 +192,8 @@ export class SupportAuthService implements OnModuleInit {
   team() {
     return this.prisma.supportAgent.findMany({
       orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
-      select: { id: true, email: true, name: true, isOwner: true, isActive: true, lastLoginAt: true, createdAt: true, passwordHash: true },
-    }).then((agents) => agents.map(({ passwordHash, ...a }) => ({ ...a, hasPassword: !!passwordHash })));
+      select: { id: true, email: true, name: true, isOwner: true, isActive: true, lastLoginAt: true, createdAt: true, passwordHash: true, totpEnabledAt: true },
+    }).then((agents) => agents.map(({ passwordHash, totpEnabledAt, ...a }) => ({ ...a, hasPassword: !!passwordHash, hasTwoStep: !!totpEnabledAt })));
   }
 
   async addAgent(caller: SupportCaller, email: string, name: string) {

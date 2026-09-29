@@ -54,23 +54,59 @@ export class ActivityService {
     };
   }
 
-  /** Re-checks the chained entries (the database trigger numbers and hashes each
-   *  new one): a changed or deleted entry shows up as the first broken number. */
-  async verify(caller: Caller) {
+  /** Checks the chained entries (the database trigger numbers and hashes each new
+   *  one): a changed or deleted entry shows up as the first broken number. Normally only
+   *  entries added since the last good check are read (from a saved checkpoint, whose
+   *  own entry is re-checked too). The whole record is re-read when asked, when there's
+   *  no checkpoint yet, and at least once a week. */
+  async verify(caller: Caller, opts: { full?: boolean } = {}) {
     await this.hrOnly(caller);
-    const rows = await this.prisma.$queryRaw<{ entries: bigint; broken: number | null }[]>`
+    const org = caller.organizationId;
+    const cp = await this.prisma.auditCheckpoint.findUnique({ where: { organizationId: org } });
+    const full = !!opts.full || !cp || Date.now() - cp.fullCheckedAt.getTime() > FULL_CHECK_EVERY_MS;
+    const from = full || !cp ? 0 : cp.seq;
+    const [totals] = await this.prisma.$queryRaw<{ entries: bigint; last: number | null }[]>`
+      SELECT count(*) AS entries, max("seq") AS last FROM "AuditEvent" WHERE "organizationId" = ${org} AND "seq" IS NOT NULL`;
+    const entries = Number(totals?.entries ?? 0);
+    // Numbers run 1, 2, 3… with no gaps, so a removed entry shows up as a count that
+    // doesn't match the last number, wherever it was.
+    if ((totals?.last ?? 0) !== entries) return { entries, intact: false, brokenAt: await this.firstGap(org), full };
+    if (cp && !full) {
+      const [anchor] = await this.prisma.$queryRaw<{ ok: boolean }[]>`
+        SELECT "hash" = ${cp.hash} AND "hash" = audit_event_hash("organizationId", "seq", "actorUserId", "eventType", "entityType", "entityId", "metadata"::jsonb, "createdAt", "prevHash") AS ok
+        FROM "AuditEvent" WHERE "organizationId" = ${org} AND "seq" = ${cp.seq}`;
+      if (!anchor?.ok) return { entries, intact: false, brokenAt: cp.seq, full };
+    }
+    // The checkpoint entry is read too (seq >= from) so the next one can be matched to it.
+    const [r] = await this.prisma.$queryRaw<{ broken: number | null; last_seq: number | null; last_hash: string | null }[]>`
       WITH c AS (
         SELECT "seq", "hash", "prevHash",
                lag("hash") OVER (ORDER BY "seq") AS prev,
                lag("seq") OVER (ORDER BY "seq") AS prev_seq,
                audit_event_hash("organizationId", "seq", "actorUserId", "eventType", "entityType", "entityId", "metadata"::jsonb, "createdAt", "prevHash") AS recomputed
-        FROM "AuditEvent" WHERE "organizationId" = ${caller.organizationId} AND "seq" IS NOT NULL
+        FROM "AuditEvent" WHERE "organizationId" = ${org} AND "seq" IS NOT NULL AND "seq" >= ${from}
       )
-      SELECT count(*) AS entries,
-             min("seq") FILTER (WHERE "hash" <> recomputed OR "prevHash" <> coalesce(prev, repeat('0', 64)) OR "seq" <> coalesce(prev_seq, 0) + 1) AS broken
+      SELECT min("seq") FILTER (WHERE "seq" > ${from} AND ("hash" <> recomputed OR "prevHash" <> coalesce(prev, repeat('0', 64)) OR "seq" <> coalesce(prev_seq, 0) + 1)) AS broken,
+             (SELECT "seq" FROM c ORDER BY "seq" DESC LIMIT 1) AS last_seq,
+             (SELECT "hash" FROM c ORDER BY "seq" DESC LIMIT 1) AS last_hash
       FROM c`;
-    const r = rows[0];
-    return { entries: Number(r?.entries ?? 0), intact: r?.broken === null || r?.broken === undefined, brokenAt: r?.broken ?? null };
+    if (r?.broken != null) return { entries, intact: false, brokenAt: r.broken, full };
+    if (r?.last_seq && r.last_hash && (r.last_seq !== from || full)) {
+      const now = new Date();
+      await this.prisma.auditCheckpoint.upsert({
+        where: { organizationId: org },
+        create: { organizationId: org, seq: r.last_seq, hash: r.last_hash, fullCheckedAt: now },
+        update: { seq: r.last_seq, hash: r.last_hash, checkedAt: now, ...(full ? { fullCheckedAt: now } : {}) },
+      });
+    }
+    return { entries, intact: true, brokenAt: null, full, checked: Math.max((r?.last_seq ?? 0) - from, 0) };
+  }
+
+  private async firstGap(org: string) {
+    const [g] = await this.prisma.$queryRaw<{ gap: number | null }[]>`
+      SELECT min(s.n)::int AS gap FROM generate_series(1, (SELECT max("seq") FROM "AuditEvent" WHERE "organizationId" = ${org})) AS s(n)
+      WHERE NOT EXISTS (SELECT 1 FROM "AuditEvent" WHERE "organizationId" = ${org} AND "seq" = s.n)`;
+    return g?.gap ?? 1;
   }
 
   // Everyone who can appear as "who did it", for the filter.
@@ -334,3 +370,5 @@ function csvCell(v: unknown): string {
   if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return `"${s.replace(/"/g, '""')}"`;
 }
+
+const FULL_CHECK_EVERY_MS = 7 * 86400000;
