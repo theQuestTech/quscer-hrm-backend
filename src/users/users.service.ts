@@ -14,7 +14,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { AddPersonDto, GrantLoginAccessDto } from './users.dto';
 import { NotifyService } from '../notifications/notify.service';

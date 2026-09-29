@@ -74,6 +74,11 @@ export class RateLimiter {
     return true;
   }
 
+  /** True when the key has used up its tries — without counting this look as a try. */
+  full(key: string, now = Date.now()): boolean {
+    return (this.hits.get(key) ?? []).filter((t) => now - t < this.windowMs).length >= this.limit;
+  }
+
   private prune(now: number) {
     for (const [k, v] of this.hits) if (!v.some((t) => now - t < this.windowMs)) this.hits.delete(k);
   }
