@@ -21,8 +21,8 @@ export class ActivityController {
   }
 
   @Get('verify')
-  verify(@Req() req: any) {
-    return this.activity.verify(req.user);
+  verify(@Req() req: any, @Query('full') full?: string) {
+    return this.activity.verify(req.user, { full: full === '1' || full === 'true' });
   }
 
   @Get('people')

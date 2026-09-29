@@ -179,8 +179,18 @@ model AuditEvent {
 
   organization Organization @relation(fields: [organizationId], references: [id])
 
+  @@unique([organizationId, seq]) // also makes "the last entry" a quick lookup for the trigger
   @@index([organizationId, entityType, entityId])
   @@index([organizationId, createdAt])
+}
+
+// The last activity entry that checked out, so the next check only reads newer ones.
+model AuditCheckpoint {
+  organizationId String   @id
+  seq            Int
+  hash           String
+  checkedAt      DateTime @default(now())
+  fullCheckedAt  DateTime
 }
 
 // ----------------------------------------------------------------------------
@@ -1451,19 +1461,37 @@ model ReminderLog {
 // never sign in to a company except through a recorded read-only view.
 
 model SupportAgent {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  name         String
-  passwordHash String? // null until they choose one from the emailed link
-  isOwner      Boolean   @default(false) // can add and remove support staff
-  isActive     Boolean   @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime  @default(now())
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String
+  passwordHash  String? // null until they choose one from the emailed link
+  isOwner       Boolean   @default(false) // can add and remove support staff
+  isActive      Boolean   @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  // Two-step sign-in — always required for support staff. Secret encrypted like bank numbers.
+  totpSecret    String?
+  totpEnabledAt DateTime?
+  totpLastStep  Int?
 
-  tokens   SupportAgentToken[]
-  actions  SupportAction[]
-  messages SupportMessage[]
-  views    SupportViewSession[]
+  tokens      SupportAgentToken[]
+  backupCodes SupportAgentBackupCode[]
+  actions     SupportAction[]
+  messages    SupportMessage[]
+  views       SupportViewSession[]
+}
+
+// One-use backup codes for a support account's two-step sign-in. Only hashes stored.
+model SupportAgentBackupCode {
+  id        String    @id @default(cuid())
+  agentId   String
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  agent SupportAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
 }
 
 // "Choose your password" links for support staff. Only the hash is stored.

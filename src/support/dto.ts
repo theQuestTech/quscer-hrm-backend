@@ -10,6 +10,16 @@ export class SupportLoginDto {
   @IsString() @MaxLength(200) password: string;
 }
 
+export class SupportLoginTwoStepDto {
+  @IsString() @MaxLength(1000) challengeToken: string;
+  @IsOptional() @IsString() @MaxLength(20) code?: string;
+  @IsOptional() @IsString() @MaxLength(20) backupCode?: string;
+}
+
+export class SupportTwoStepConfirmDto {
+  @IsString() @MaxLength(20) code: string;
+}
+
 export class SupportForgotDto {
   @IsEmail() @MaxLength(200) email: string;
 }
