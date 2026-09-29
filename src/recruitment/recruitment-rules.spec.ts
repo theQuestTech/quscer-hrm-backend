@@ -58,6 +58,16 @@ describe('acceptingApplications', () => {
 });
 
 describe('RateLimiter', () => {
+  it('full() looks without using up a try', () => {
+    const r = new RateLimiter(2, 1000);
+    expect(r.full('mail', 0)).toBe(false);
+    r.allow('mail', 0);
+    expect(r.full('mail', 5)).toBe(false);
+    r.allow('mail', 10);
+    expect(r.full('mail', 20)).toBe(true);
+    expect(r.full('mail', 1500)).toBe(false);
+  });
+
   it('blocks after the limit and lets through again later', () => {
     const r = new RateLimiter(2, 1000);
     expect(r.allow('ip', 0)).toBe(true);

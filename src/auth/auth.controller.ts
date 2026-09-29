@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpException, HttpStatus, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpException, HttpStatus, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { AuthService } from './auth.service';
@@ -16,6 +16,18 @@ import { visitorAddress } from '../common/visitor-address';
 const resetPerVisitor = new RateLimiter(10, 60 * 60 * 1000);
 const resetPerEmail = new RateLimiter(3, 60 * 60 * 1000);
 
+// Sign-in limits, so nobody can keep guessing passwords: 30 tries per visitor
+// and 10 wrong passwords per email in 15 minutes. A right password doesn't
+// use up the email's tries.
+const signInPerVisitor = new RateLimiter(30, 15 * 60 * 1000);
+const wrongPasswordPerEmail = new RateLimiter(10, 15 * 60 * 1000);
+// New companies: 5 an hour per visitor, against bulk fake sign-ups.
+const signupPerVisitor = new RateLimiter(5, 60 * 60 * 1000);
+// Changing password checks the current one: 10 tries an hour per login.
+const changePasswordPerUser = new RateLimiter(10, 60 * 60 * 1000);
+
+const tooMany = () => new HttpException('Too many tries — please wait a while and try again', HttpStatus.TOO_MANY_REQUESTS);
+
 @Controller('auth')
 export class AuthController {
   constructor(
@@ -29,7 +41,7 @@ export class AuthController {
   @HttpCode(200)
   forgotPassword(@Req() req: Request, @Body() dto: ForgotPasswordDto) {
     if (!resetPerVisitor.allow(visitorAddress(req))) {
-      throw new HttpException('Too many tries — please wait a while and try again', HttpStatus.TOO_MANY_REQUESTS);
+      throw tooMany();
     }
     if (!resetPerEmail.allow(dto.email.trim().toLowerCase())) {
       return this.passwordReset.answer();
@@ -41,7 +53,7 @@ export class AuthController {
   @HttpCode(200)
   resetPassword(@Req() req: Request, @Body() dto: ResetPasswordWithTokenDto) {
     if (!resetPerVisitor.allow(visitorAddress(req))) {
-      throw new HttpException('Too many tries — please wait a while and try again', HttpStatus.TOO_MANY_REQUESTS);
+      throw tooMany();
     }
     return this.passwordReset.reset(dto.token, dto.newPassword);
   }
@@ -50,13 +62,21 @@ export class AuthController {
   // An email that already has a login is refused — that person adds a
   // company with POST /auth/companies instead.
   @Post('signup')
-  async signup(@Body() dto: SignupDto) {
+  async signup(@Req() req: Request, @Body() dto: SignupDto) {
+    if (!signupPerVisitor.allow(visitorAddress(req))) throw tooMany();
     return this.authService.signup(dto);
   }
 
   @Post('login')
-  async login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  async login(@Req() req: Request, @Body() dto: LoginDto) {
+    const email = dto.email.trim().toLowerCase();
+    if (!signInPerVisitor.allow(visitorAddress(req)) || wrongPasswordPerEmail.full(email)) throw tooMany();
+    try {
+      return await this.authService.login(dto);
+    } catch (e) {
+      if (e instanceof UnauthorizedException) wrongPasswordPerEmail.allow(email);
+      throw e;
+    }
   }
 
   @Get('me')
@@ -76,6 +96,7 @@ export class AuthController {
   @Post('change-password')
   @UseGuards(JwtAuthGuard)
   async changePassword(@Req() req: any, @Body() dto: ChangePasswordDto) {
+    if (!changePasswordPerUser.allow(req.user.id)) throw tooMany();
     return this.authService.changePassword(req.user.id, req.user.organizationId, dto);
   }
 

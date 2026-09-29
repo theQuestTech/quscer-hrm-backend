@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import helmet from 'helmet';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { text } from 'express';
@@ -8,6 +9,10 @@ import { machineOnly } from './attendance-devices/machine-port';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  // Standard security headers (HSTS, nosniff, no framing, no X-Powered-By). No CSP: this
+  // serves JSON and files, not pages. Photos and documents are shown on the HRM site's own
+  // domain, so they may be loaded cross-origin.
+  app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   // Attendance machines (ZKTeco ADMS) upload punches as plain text, whatever
   // content type they claim. Read it as text before the JSON/form parsers.
   app.use('/iclock', text({ type: () => true, limit: '5mb' }));
