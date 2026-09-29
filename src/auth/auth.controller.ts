@@ -3,7 +3,7 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { AuthService } from './auth.service';
 import { SignupDto } from './dto/signup.dto';
-import { LoginDto } from './dto/login.dto';
+import { LoginDto, LoginTwoStepDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { AddCompanyDto, SwitchCompanyDto } from './dto/company.dto';
 import { ForgotPasswordDto, ResetPasswordWithTokenDto } from './dto/password-reset.dto';
@@ -65,6 +65,15 @@ export class AuthController {
   async signup(@Req() req: Request, @Body() dto: SignupDto) {
     if (!signupPerVisitor.allow(visitorAddress(req))) throw tooMany();
     return this.authService.signup(dto);
+  }
+
+  /** Second step of sign-in when two-step is on: the 6-digit code or a backup code. */
+  @Post('login/two-step')
+  @HttpCode(200)
+  async loginTwoStep(@Req() req: Request, @Body() dto: LoginTwoStepDto) {
+    if (!signInPerVisitor.allow(visitorAddress(req))) throw tooMany();
+    const ua = req.headers['user-agent'];
+    return this.authService.loginTwoStep(dto, typeof ua === 'string' ? ua : undefined);
   }
 
   @Post('login')

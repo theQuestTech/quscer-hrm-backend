@@ -16,7 +16,13 @@ import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { RbacService } from '../rbac/rbac.service';
 import { SignupDto } from './dto/signup.dto';
-import { LoginDto } from './dto/login.dto';
+import { LoginDto, LoginTwoStepDto } from './dto/login.dto';
+import { TwoStepService } from '../two-step/two-step.service';
+import { AttemptCounter } from '../two-step/attempt-counter';
+import { randomBytes } from 'crypto';
+
+// Wrong two-step codes allowed per sign-in before the password is asked again.
+const codeTries = new AttemptCounter(5, 5 * 60 * 1000);
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { findEmployeeForUser } from '../common/current-employee';
 import { findActiveMembership } from '../common/membership';
@@ -44,6 +50,7 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private rbacService: RbacService,
+    private twoStep: TwoStepService,
   ) {}
 
   // A new company plus its first login. One email is one login across the
@@ -139,10 +146,55 @@ export class AuthService {
       // Open their own company if they still have it, else the first other one.
       const membership = open.find((m) => m.organizationId === user.organizationId) ?? open[0];
       if (!membership) break;
-      await this.prisma.user.update({ where: { id: user.id }, data: { lastSeenAt: new Date() } });
-      return this.issueToken(user.id, membership.organizationId, user.email);
+      // Two-step sign-in: after the right password, the code — unless this
+      // browser was trusted in the last 30 days.
+      if (user.totpEnabledAt && !(await this.twoStep.isTrusted(user.id, dto.trustedDeviceToken))) {
+        const challengeToken = await this.jwtService.signAsync(
+          { acc: user.id, org: membership.organizationId, purpose: 'two-step-login', jti: randomBytes(12).toString('hex') },
+          { expiresIn: '5m' },
+        );
+        return { twoStepRequired: true as const, challengeToken };
+      }
+      return this.finishLogin(user.id, membership.organizationId, user.email, user.totpEnabledAt ? 'trusted computer' : 'password');
     }
     throw new UnauthorizedException('Invalid email or password');
+  }
+
+  /** The code (or a backup code) after the password. Five tries per sign-in;
+   *  the challenge lasts five minutes. */
+  async loginTwoStep(dto: LoginTwoStepDto, userAgent?: string) {
+    let c: { acc: string; org: string; purpose: string; jti: string };
+    try {
+      c = await this.jwtService.verifyAsync(dto.challengeToken);
+    } catch {
+      throw new UnauthorizedException('That sign-in took too long — enter your password again');
+    }
+    if (c.purpose !== 'two-step-login') throw new UnauthorizedException('Enter your password again');
+    if (!codeTries.allow(c.jti)) throw new UnauthorizedException('Too many wrong codes — enter your password again');
+    let method: string;
+    if (dto.backupCode) {
+      if (!(await this.twoStep.useBackupCode(c.acc, dto.backupCode))) throw new UnauthorizedException("That backup code isn't right or was already used");
+      method = 'backup code';
+    } else {
+      try {
+        await this.twoStep.checkCode(c.acc, dto.code);
+      } catch {
+        throw new UnauthorizedException("That code isn't right — check the app and try the newest code");
+      }
+      method = 'two-step code';
+    }
+    codeTries.forget(c.jti);
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: c.acc } });
+    const res = await this.finishLogin(user.id, c.org, user.email, method);
+    return dto.trustDevice ? { ...res, trustedDeviceToken: await this.twoStep.trustDevice(user.id, userAgent) } : res;
+  }
+
+  private async finishLogin(userId: string, organizationId: string, email: string, method: string) {
+    await this.prisma.user.update({ where: { id: userId }, data: { lastSeenAt: new Date() } });
+    await this.prisma.auditEvent.create({
+      data: { organizationId, actorUserId: userId, eventType: method === 'backup code' ? 'user.signed_in_backup_code' : 'user.signed_in', entityType: 'User', entityId: userId, metadata: { method } },
+    });
+    return this.issueToken(userId, organizationId, email);
   }
 
   // Everything the frontend needs to render the right screens for this user:
@@ -285,11 +337,15 @@ export class AuthService {
     });
   }
 
-  private async issueToken(userId: string, organizationId: string, email: string) {
+  async issueToken(userId: string, organizationId: string, email: string) {
+    // tsr: two-step sign-in is required here but not on yet — JwtAuthGuard
+    // then only opens the setup screens.
+    const tsr = await this.twoStep.setupPending(userId, organizationId);
     const accessToken = await this.jwtService.signAsync({
       id: userId,
       organizationId,
       email,
+      ...(tsr ? { tsr: true } : {}),
     });
     return { accessToken };
   }

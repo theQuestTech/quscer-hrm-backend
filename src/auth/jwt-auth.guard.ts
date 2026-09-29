@@ -15,7 +15,13 @@ export interface RequestUser {
   email: string;
   // Set when Quscer support is looking at HRM as this person (read-only).
   view?: { sessionId: string; agentId: string };
+  // Two-step sign-in is required but not set up yet (only setup is open).
+  tsr?: boolean;
 }
+
+// While two-step setup is pending, only these open (the app reads /auth/me to
+// know where to send the person).
+const TWO_STEP_SETUP_PATHS = ['/auth/two-step', '/auth/me'];
 
 // The only change a support view may make: ending itself.
 const END_VIEW_PATH = '/auth/end-support-view';
@@ -65,10 +71,15 @@ export class JwtAuthGuard implements CanActivate {
       throw new ForbiddenException(SUSPENDED_MESSAGE);
     }
 
+    if (payload.tsr && !TWO_STEP_SETUP_PATHS.some((p) => String(request.path ?? '').startsWith(p))) {
+      throw new ForbiddenException({ code: 'TWO_STEP_SETUP_REQUIRED', message: 'Set up two-step sign-in to continue' });
+    }
+
     request.user = {
       id: payload.id,
       organizationId: payload.organizationId,
       email: payload.email,
+      ...(payload.tsr && { tsr: true }),
       ...(payload.view && { view: { sessionId: payload.view.sessionId, agentId: payload.view.agentId } }),
     } satisfies RequestUser;
     return true;
