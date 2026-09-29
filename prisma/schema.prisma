@@ -19,17 +19,19 @@ datasource db {
 // 1.3 — Tenancy
 // ----------------------------------------------------------------------------
 model Organization {
-  id              String    @id @default(cuid())
-  name            String
-  quscerOrgId     String?   @unique // set once linked to Quscer OS (task 6.1) — null until then
+  id                   String    @id @default(cuid())
+  name                 String
+  quscerOrgId          String?   @unique // set once linked to Quscer OS (task 6.1) — null until then
   // Public careers page address: /careers/<careersSlug>. Set on first use.
-  careersSlug     String?   @unique
+  careersSlug          String?   @unique
   // Switched off by Quscer support: nobody can sign in, no emails go out
   // and the careers page is hidden. Data is kept.
-  suspendedAt     DateTime?
-  suspendedReason String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  suspendedAt          DateTime?
+  suspendedReason      String?
+  // Two-step sign-in for everyone here, not just people who handle pay (HR's choice).
+  requireTwoStepForAll Boolean   @default(false)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   users             User[]
   memberships       Membership[]
@@ -61,6 +63,11 @@ model User {
   isActive       Boolean   @default(true)
   // Last sign-in or app open (updated at most every few minutes).
   lastSeenAt     DateTime?
+  // Two-step sign-in (authenticator app). The secret is stored encrypted; the
+  // last accepted 30-second step stops the same code being used twice.
+  totpSecret     String?
+  totpEnabledAt  DateTime?
+  totpLastStep   Int?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
@@ -162,6 +169,13 @@ model AuditEvent {
   entityId       String
   metadata       Json     @default("{}")
   createdAt      DateTime @default(now())
+  // Filled in by a database trigger on insert: a number per company and a hash
+  // covering the entry and the one before it, so a changed or deleted entry is
+  // detected. The same trigger refuses updates and deletes (see the
+  // 20261201000000_two_step_and_audit_chain migration).
+  seq            Int?
+  prevHash       String?
+  hash           String?
 
   organization Organization @relation(fields: [organizationId], references: [id])
 
@@ -1568,4 +1582,59 @@ model EmailLog {
   @@index([organizationId, createdAt])
   @@index([createdAt])
   @@index([to])
+}
+
+// ----------------------------------------------------------------------------
+// Security phase 2: two-step sign-in and second-person approval
+// ----------------------------------------------------------------------------
+
+model TwoStepBackupCode {
+  id        String    @id @default(cuid())
+  userId    String
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// "Trust this computer for 30 days" — skips the code step on that browser.
+model TrustedDevice {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique
+  userAgent  String?
+  expiresAt  DateTime
+  lastUsedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+}
+
+enum BankChangeStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+// A change to an employee's salary bank account waits for a second person —
+// switching someone's salary to another account is a common fraud.
+model PendingBankDetailChange {
+  id                 String           @id @default(cuid())
+  organizationId     String
+  employeeId         String
+  bankName           String
+  accountTitle       String
+  accountNumber      String // encrypted like EmployeeBankDetail.accountNumber
+  accountNumberLast4 String
+  branchCode         String?
+  status             BankChangeStatus @default(PENDING)
+  requestedByUserId  String
+  decidedByUserId    String?
+  decidedAt          DateTime?
+  note               String?
+  createdAt          DateTime         @default(now())
+
+  @@index([organizationId, status])
 }

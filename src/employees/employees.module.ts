@@ -6,10 +6,11 @@ import { EmployeesController } from './employees.controller';
 import { EmployeesService } from './employees.service';
 import { PhotoController } from './photo.controller';
 import { MeController } from './me.controller';
+import { BankChangesController } from './bank-changes.controller';
 
 @Module({
   imports: [AuthModule, RbacModule, AttendanceDevicesModule],
-  controllers: [EmployeesController, PhotoController, MeController],
+  controllers: [EmployeesController, PhotoController, MeController, BankChangesController],
   providers: [EmployeesService],
   exports: [EmployeesService],
 })

@@ -20,6 +20,11 @@ export class ActivityController {
     return this.activity.list(req.user, { area, actor, from, to }, cursor);
   }
 
+  @Get('verify')
+  verify(@Req() req: any) {
+    return this.activity.verify(req.user);
+  }
+
   @Get('people')
   people(@Req() req: any) {
     return this.activity.people(req.user);

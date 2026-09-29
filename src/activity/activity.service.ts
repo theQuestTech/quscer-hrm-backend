@@ -54,6 +54,25 @@ export class ActivityService {
     };
   }
 
+  /** Re-checks the chained entries (the database trigger numbers and hashes each
+   *  new one): a changed or deleted entry shows up as the first broken number. */
+  async verify(caller: Caller) {
+    await this.hrOnly(caller);
+    const rows = await this.prisma.$queryRaw<{ entries: bigint; broken: number | null }[]>`
+      WITH c AS (
+        SELECT "seq", "hash", "prevHash",
+               lag("hash") OVER (ORDER BY "seq") AS prev,
+               lag("seq") OVER (ORDER BY "seq") AS prev_seq,
+               audit_event_hash("organizationId", "seq", "actorUserId", "eventType", "entityType", "entityId", "metadata"::jsonb, "createdAt", "prevHash") AS recomputed
+        FROM "AuditEvent" WHERE "organizationId" = ${caller.organizationId} AND "seq" IS NOT NULL
+      )
+      SELECT count(*) AS entries,
+             min("seq") FILTER (WHERE "hash" <> recomputed OR "prevHash" <> coalesce(prev, repeat('0', 64)) OR "seq" <> coalesce(prev_seq, 0) + 1) AS broken
+      FROM c`;
+    const r = rows[0];
+    return { entries: Number(r?.entries ?? 0), intact: r?.broken === null || r?.broken === undefined, brokenAt: r?.broken ?? null };
+  }
+
   // Everyone who can appear as "who did it", for the filter.
   async people(caller: Caller) {
     await this.hrOnly(caller);
@@ -275,6 +294,9 @@ export class ActivityService {
       if (e.eventType === 'user.updated' && typeof meta.isActive === 'boolean') detail = meta.isActive ? 'Access switched on' : 'Access switched off';
       if (e.eventType === 'employee.updated' && Array.isArray(meta.changedFields)) detail = `Changed: ${meta.changedFields.map(fieldName).join(', ')}`;
       if (e.eventType === 'attendance.checkin_blocked' && meta.reason) detail = String(meta.reason);
+      if (e.eventType.startsWith('employee.bank_') && meta.newLast4) detail = `Account ****${meta.newLast4}${meta.oldLast4 ? ` (was ****${meta.oldLast4})` : ''}`;
+      if (e.eventType === 'organization.two_step_for_all') detail = meta.on ? 'Everyone must use it' : 'Only people who handle pay, records or settings';
+      if (e.eventType === 'user.signed_in' && meta.method) detail = `With ${meta.method}`;
       if (e.eventType === 'payroll.bank_file_exported' && meta.payments !== undefined) detail = `${meta.payments} payment${meta.payments === 1 ? '' : 's'}`;
       if (e.eventType.startsWith('support.')) {
         const parts = [meta.email && !subject ? `To ${meta.email}` : null, meta.reason ? `Reason: “${meta.reason}”` : null].filter(Boolean);

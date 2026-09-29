@@ -158,6 +158,6 @@ export class EmployeesController {
     @Param('id') id: string,
     @Body() dto: UpsertBankDetailDto,
   ) {
-    return this.employeesService.upsertBankDetail(req.user.organizationId, id, dto);
+    return this.employeesService.upsertBankDetail(req, id, dto);
   }
 }

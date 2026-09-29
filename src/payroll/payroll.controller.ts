@@ -6,6 +6,8 @@ import { PayrollService } from './payroll.service';
 import { PayslipPdfService } from './payslip-pdf.service';
 import { UpsertSalaryStructureDto, CreatePayrollRunDto, CreateLoanDto, UpsertFinalSettlementDto } from './dto/payroll.dto';
 import { SettlementService } from './settlement.service';
+import { TwoStepService } from '../two-step/two-step.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Controller()
 @UseGuards(JwtAuthGuard, PermissionGuard)
@@ -14,7 +16,22 @@ export class PayrollController {
     private payrollService: PayrollService,
     private payslipPdfService: PayslipPdfService,
     private settlementService: SettlementService,
+    private twoStep: TwoStepService,
+    private prisma: PrismaService,
   ) {}
+
+  private recordAlone(req: any, entityType: 'PayrollRun' | 'FinalSettlement', entityId: string) {
+    return this.prisma.auditEvent.create({
+      data: {
+        organizationId: req.user.organizationId,
+        actorUserId: req.user.id,
+        eventType: entityType === 'PayrollRun' ? 'payroll.approved_alone' : 'settlement.approved_alone',
+        entityType,
+        entityId,
+        metadata: { codeConfirmed: true },
+      },
+    });
+  }
 
   // --- WBS 4.14 — final settlement -------------------------------------
   // Same maker/checker split as payroll runs: payroll.run drafts,
@@ -34,13 +51,18 @@ export class PayrollController {
 
   @Patch('final-settlements/:id/approve')
   @RequirePermission('hrm.payroll.approve')
-  approveSettlement(@Req() req: any, @Param('id') id: string) {
-    return this.settlementService.approve(req.user.organizationId, req.user.id, id);
+  async approveSettlement(@Req() req: any, @Param('id') id: string) {
+    const s = await this.prisma.finalSettlement.findFirst({ where: { id, organizationId: req.user.organizationId }, select: { createdByUserId: true } });
+    const alone = await this.twoStep.approveCheck(req, s?.createdByUserId, 'hrm.payroll.approve', 'final settlement');
+    const res = await this.settlementService.approve(req.user.organizationId, req.user.id, id);
+    if (alone) await this.recordAlone(req, 'FinalSettlement', id);
+    return res;
   }
 
   @Patch('final-settlements/:id/mark-paid')
   @RequirePermission('hrm.payroll.approve')
-  markSettlementPaid(@Req() req: any, @Param('id') id: string) {
+  async markSettlementPaid(@Req() req: any, @Param('id') id: string) {
+    await this.twoStep.requireCode(req);
     return this.settlementService.markPaid(req.user.organizationId, req.user.id, id);
   }
 
@@ -104,13 +126,18 @@ export class PayrollController {
   // by default ("Payroll Approver" has both, but doesn't have to).
   @Post('payroll-runs/:id/approve')
   @RequirePermission('hrm.payroll.approve')
-  approve(@Req() req: any, @Param('id') id: string) {
-    return this.payrollService.approve(req.user.organizationId, req.user.id, id);
+  async approve(@Req() req: any, @Param('id') id: string) {
+    const run = await this.prisma.payrollRun.findFirst({ where: { id, organizationId: req.user.organizationId }, select: { runByUserId: true } });
+    const alone = await this.twoStep.approveCheck(req, run?.runByUserId, 'hrm.payroll.approve', 'payroll');
+    const res = await this.payrollService.approve(req.user.organizationId, req.user.id, id);
+    if (alone) await this.recordAlone(req, 'PayrollRun', id);
+    return res;
   }
 
   @Post('payroll-runs/:id/lock')
   @RequirePermission('hrm.payroll.approve')
-  lock(@Req() req: any, @Param('id') id: string) {
+  async lock(@Req() req: any, @Param('id') id: string) {
+    await this.twoStep.requireCode(req);
     return this.payrollService.lock(req.user.organizationId, req.user.id, id);
   }
 
@@ -126,6 +153,8 @@ export class PayrollController {
   @Get('payroll-runs/:id/bank-file')
   @RequirePermission('hrm.payroll.approve')
   async bankFile(@Req() req: any, @Param('id') id: string, @Res() res: Response) {
+    // Full account numbers — confirmed with a code.
+    await this.twoStep.requireCode(req);
     const { csv, filename, missingBankDetails } = await this.payrollService.bankFile(
       req.user.organizationId, req.user.id, id,
     );

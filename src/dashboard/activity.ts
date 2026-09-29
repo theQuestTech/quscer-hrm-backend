@@ -79,6 +79,21 @@ const PHRASES: Record<string, string> = {
   'support.user.reset_link_sent': 'sent a password reset link',
   'support.user.welcome_resent': 'resent the welcome email',
   'support.user.viewed': 'viewed Quscer People as {subject}, read-only',
+  'user.signed_in': 'signed in',
+  'user.signed_in_backup_code': 'signed in with a backup code',
+  'user.two_step_enabled': 'turned on two-step sign-in',
+  'user.two_step_disabled': 'turned off two-step sign-in',
+  'user.backup_codes_replaced': 'made new backup codes',
+  'user.trusted_computers_forgotten': 'stopped trusting their computers',
+  'organization.two_step_for_all': 'changed who must use two-step sign-in',
+  'payroll.approved_alone': 'approved payroll alone (nobody else can approve)',
+  'settlement.approved_alone': 'approved a final settlement alone (nobody else can approve)',
+  'employee.bank_added': 'added a salary bank account',
+  'employee.bank_change_requested': 'asked to change a salary bank account',
+  'employee.bank_change_approved': 'approved a salary bank account change',
+  'employee.bank_change_rejected': 'turned down a salary bank account change',
+  'employee.bank_change_cancelled': 'cancelled a salary bank account change',
+  'employee.bank_changed_alone': 'changed a salary bank account alone (nobody else can approve)',
 };
 
 export function activityPhrase(eventType: string): string {

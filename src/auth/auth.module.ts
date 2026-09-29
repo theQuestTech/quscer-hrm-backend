@@ -7,6 +7,8 @@ import { AuthService } from './auth.service';
 import { RbacModule } from '../rbac/rbac.module';
 import { MailModule } from '../notifications/mail.module';
 import { PasswordResetService } from './password-reset';
+import { TwoStepService } from '../two-step/two-step.service';
+import { CompanySecurityController, TwoStepController } from '../two-step/two-step.controller';
 
 @Module({
   imports: [
@@ -21,8 +23,8 @@ import { PasswordResetService } from './password-reset';
       }),
     }),
   ],
-  controllers: [AuthController],
-  providers: [JwtAuthGuard, AuthService, PasswordResetService],
-  exports: [JwtModule, JwtAuthGuard, PasswordResetService],
+  controllers: [AuthController, TwoStepController, CompanySecurityController],
+  providers: [JwtAuthGuard, AuthService, PasswordResetService, TwoStepService],
+  exports: [JwtModule, JwtAuthGuard, PasswordResetService, TwoStepService],
 })
 export class AuthModule {}

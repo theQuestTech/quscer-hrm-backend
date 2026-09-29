@@ -1,9 +1,5 @@
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { TwoStepService } from '../two-step/two-step.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { FieldEncryptionService } from '../crypto/field-encryption.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
@@ -39,6 +35,7 @@ export class EmployeesService {
     private prisma: PrismaService,
     private fieldEncryption: FieldEncryptionService,
     private punches: PunchService,
+    private twoStep: TwoStepService,
   ) {}
 
   // "00012" on the machine = "12" here; also checks nobody else has it.
@@ -364,8 +361,15 @@ export class EmployeesService {
 
   // Upsert — WBS calls this "bank details", singular per employee (see
   // EmployeeBankDetail.employeeId @unique in schema).
-  async upsertBankDetail(organizationId: string, employeeId: string, dto: any) {
-    await this.findOne(organizationId, employeeId);
+  //
+  // Confirmed with a code. Adding the first account applies straight away;
+  // CHANGING an existing account waits for a second person with employee
+  // rights (switching someone's salary elsewhere is a common fraud) — unless
+  // nobody else has those rights, then it applies, recorded as "alone".
+  async upsertBankDetail(req: any, employeeId: string, dto: any) {
+    const organizationId: string = req.user.organizationId;
+    const employee = await this.findOne(organizationId, employeeId);
+    await this.twoStep.requireCode(req);
     const digits = dto.accountNumber.replace(/\s+/g, '');
     const data = {
       bankName: dto.bankName,
@@ -374,11 +378,72 @@ export class EmployeesService {
       accountNumber: this.fieldEncryption.encrypt(digits),
       accountNumberLast4: digits.slice(-4),
     };
+    const existing = await this.prisma.employeeBankDetail.findUnique({ where: { employeeId } });
+    const name = `${employee.firstName} ${employee.lastName}`;
+    if (existing && (await this.twoStep.othersWithPermission(organizationId, req.user.id, 'hrm.employee.write')).length) {
+      const change = await this.prisma.pendingBankDetailChange.create({
+        data: { organizationId, employeeId, ...data, requestedByUserId: req.user.id },
+      });
+      await this.bankEvent(req, 'employee.bank_change_requested', employeeId, { employee: name, newLast4: data.accountNumberLast4, oldLast4: existing.accountNumberLast4 ?? '' });
+      return { pendingApproval: { id: change.id } };
+    }
     const detail = await this.prisma.employeeBankDetail.upsert({
       where: { employeeId },
       create: { employeeId, ...data },
       update: data,
     });
+    await this.bankEvent(req, existing ? 'employee.bank_changed_alone' : 'employee.bank_added', employeeId, { employee: name, newLast4: data.accountNumberLast4, ...(existing ? { oldLast4: existing.accountNumberLast4 ?? '' } : {}) });
     return this.maskBankDetail(detail);
+  }
+
+  private bankEvent(req: any, eventType: string, employeeId: string, metadata: Record<string, string>) {
+    return this.prisma.auditEvent.create({
+      data: { organizationId: req.user.organizationId, actorUserId: req.user.id, eventType, entityType: 'Employee', entityId: employeeId, metadata: { ...metadata, codeConfirmed: true } },
+    });
+  }
+
+  listBankChanges(organizationId: string, status?: string) {
+    return this.prisma.pendingBankDetailChange.findMany({
+      where: { organizationId, ...(status ? { status: status as never } : {}) },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      select: { id: true, employeeId: true, bankName: true, accountTitle: true, accountNumberLast4: true, branchCode: true, status: true, requestedByUserId: true, decidedByUserId: true, decidedAt: true, note: true, createdAt: true },
+    });
+  }
+
+  /** The second person approves (with their code); the new account then applies. */
+  async approveBankChange(req: any, id: string) {
+    const change = await this.pendingChange(req.user.organizationId, id);
+    if (change.requestedByUserId === req.user.id && (await this.twoStep.othersWithPermission(req.user.organizationId, req.user.id, 'hrm.employee.write')).length) {
+      throw new ForbiddenException('You asked for this change, so a different person has to approve it');
+    }
+    await this.twoStep.requireCode(req);
+    const claimed = await this.prisma.pendingBankDetailChange.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'APPROVED', decidedByUserId: req.user.id, decidedAt: new Date() } });
+    if (claimed.count === 0) throw new BadRequestException('This was already decided');
+    const data = { bankName: change.bankName, accountTitle: change.accountTitle, branchCode: change.branchCode, accountNumber: change.accountNumber, accountNumberLast4: change.accountNumberLast4 };
+    await this.prisma.employeeBankDetail.upsert({ where: { employeeId: change.employeeId }, create: { employeeId: change.employeeId, ...data }, update: data });
+    await this.bankEvent(req, 'employee.bank_change_approved', change.employeeId, { newLast4: change.accountNumberLast4, requestedBy: change.requestedByUserId });
+    return { status: 'APPROVED' };
+  }
+
+  async rejectBankChange(req: any, id: string, note?: string) {
+    const change = await this.pendingChange(req.user.organizationId, id);
+    const cancel = change.requestedByUserId === req.user.id;
+    const res = await this.prisma.pendingBankDetailChange.updateMany({
+      where: { id, status: 'PENDING' },
+      data: { status: cancel ? 'CANCELLED' : 'REJECTED', decidedByUserId: req.user.id, decidedAt: new Date(), note: note?.trim().slice(0, 300) || null },
+    });
+    if (res.count === 0) throw new BadRequestException('This was already decided');
+    await this.prisma.auditEvent.create({
+      data: { organizationId: req.user.organizationId, actorUserId: req.user.id, eventType: cancel ? 'employee.bank_change_cancelled' : 'employee.bank_change_rejected', entityType: 'Employee', entityId: change.employeeId, metadata: { newLast4: change.accountNumberLast4, ...(note ? { note: note.slice(0, 120) } : {}) } },
+    });
+    return { status: cancel ? 'CANCELLED' : 'REJECTED' };
+  }
+
+  private async pendingChange(organizationId: string, id: string) {
+    const change = await this.prisma.pendingBankDetailChange.findFirst({ where: { id, organizationId } });
+    if (!change) throw new NotFoundException('Change not found');
+    if (change.status !== 'PENDING') throw new BadRequestException('This was already decided');
+    return change;
   }
 }
