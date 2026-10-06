@@ -22,6 +22,8 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { SupportModule } from './support/support.module';
 import { ActivityModule } from './activity/activity.module';
 
+import { EnvironmentController } from './common/environment.controller';
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -47,5 +49,6 @@ import { ActivityModule } from './activity/activity.module';
     SupportModule,
     ActivityModule,
   ],
+  controllers: [EnvironmentController],
 })
 export class AppModule {}
