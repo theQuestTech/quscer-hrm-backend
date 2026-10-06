@@ -1591,6 +1591,7 @@ enum EmailStatus {
   DELIVERED // reached the inbox (reported by Resend's webhook)
   BOUNCED // the receiving server refused it
   COMPLAINED // marked as spam
+  HELD // not sent: staging (address not on STAGING_EMAIL_ALLOW) or a made-up address
 }
 
 // Every email HRM sends — who to, what kind and what happened. Not the

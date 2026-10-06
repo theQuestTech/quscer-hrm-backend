@@ -8,6 +8,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { isMadeUpAddress, isStaging, stagingEmailAllowed } from '../common/environment';
 
 export interface Email {
   to: string;
@@ -38,6 +39,13 @@ export class Mailer {
   // problem can't reveal anything to the person asking.
   async send(email: Email, meta: EmailMeta = { kind: 'other' }): Promise<boolean> {
     if (!this.enabled) return false;
+    // Held, not sent: made-up addresses anywhere, and on staging anything not allowed.
+    // Counted as sent, so the app behaves the same; support sees "Held".
+    if (isMadeUpAddress(email.to) || (isStaging() && !stagingEmailAllowed(email.to))) {
+      await this.record(email, meta, 'HELD', isStaging() ? 'Held (staging)' : 'Held (made-up address)', null);
+      return true;
+    }
+    if (isStaging()) email = { ...email, subject: `[Staging] ${email.subject}` };
     let ok = false;
     let error: string | null = null;
     let providerId: string | null = null;
@@ -65,11 +73,11 @@ export class Mailer {
       error = 'Could not reach the email service';
       this.log.error(`Could not reach Resend: ${e instanceof Error ? e.message : e}`);
     }
-    await this.record(email, meta, ok, error, providerId);
+    await this.record(email, meta, ok ? 'SENT' : 'FAILED', error, providerId);
     return ok;
   }
 
-  private async record(email: Email, meta: EmailMeta, ok: boolean, error: string | null, providerId: string | null) {
+  private async record(email: Email, meta: EmailMeta, status: 'SENT' | 'FAILED' | 'HELD', error: string | null, providerId: string | null) {
     try {
       // Resend's ids are unique; a stand-in used in tests may repeat one.
       const idFree = providerId && !(await this.prisma.emailLog.findUnique({ where: { providerId } }));
@@ -79,7 +87,7 @@ export class Mailer {
           to: email.to.toLowerCase(),
           kind: meta.kind,
           subject: email.subject.slice(0, 300),
-          status: ok ? 'SENT' : 'FAILED',
+          status,
           error: error?.slice(0, 500),
           providerId: idFree ? providerId : null,
         },
