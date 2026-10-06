@@ -15,7 +15,9 @@
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
     "encrypt:bank-details": "ts-node scripts/encrypt-bank-details.ts",
-    "prisma:deploy": "prisma migrate deploy"
+    "prisma:deploy": "prisma migrate deploy",
+    "demo:seed": "node dist/scripts/demo-seed.js",
+    "demo:reset": "node dist/scripts/demo-seed.js --yes --reset"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.6",
