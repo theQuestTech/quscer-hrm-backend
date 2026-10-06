@@ -1,3 +1,4 @@
+import { isStaging } from './common/environment';
 import { NestFactory } from '@nestjs/core';
 import helmet from 'helmet';
 import { ValidationPipe } from '@nestjs/common';
@@ -28,7 +29,8 @@ async function bootstrap() {
   });
   const port = process.env.PORT ?? 4100;
   await app.listen(port);
-  console.log(`Quscer HRM backend listening on port ${port}`);
+  console.log(`Quscer HRM backend listening on port ${port}${isStaging() ? ' — STAGING (test data only)' : ''}`);
+  if (isStaging()) console.log(`Staging: email only goes to ${process.env.STAGING_EMAIL_ALLOW || 'nobody (STAGING_EMAIL_ALLOW is empty)'}`);
 
   // Older attendance machines can only speak plain HTTP. MACHINE_PORT opens a
   // second door that answers the machine address (/iclock) and nothing else.

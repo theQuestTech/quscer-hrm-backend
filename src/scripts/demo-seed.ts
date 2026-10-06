@@ -536,7 +536,7 @@ async function removeExisting(app: App) {
     // renamed and suspended, with its history.
     prisma.organization.update({
       where: { id: organizationId },
-      data: { name: `${DEMO.companyName} — replaced ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`, suspendedAt: new Date(), suspendedReason: 'Demo rebuilt', careersSlug: null },
+      data: { name: `Old demo — replaced ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`, suspendedAt: new Date(), suspendedReason: 'Demo rebuilt', careersSlug: null },
     }),
   ]);
   log('Cleared the old demo company (kept, renamed and suspended, with its activity record)');

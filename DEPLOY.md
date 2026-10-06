@@ -90,3 +90,7 @@ that works.
 - Treat this Railway environment as staging: real enough to click through
   and test end-to-end, not real enough for actual payroll runs on real
   employees.
+
+## Staging copy and demo company
+
+See [docs/staging-setup.md](docs/staging-setup.md) for the staging copy on Railway (QUSCER_ENV=staging, email allow list) and the demo company (npm run demo:seed / demo:reset, or **Rebuild demo** in the support console).
