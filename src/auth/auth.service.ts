@@ -249,6 +249,7 @@ export class AuthService {
         timezone: organization.localeSettings?.defaultTimezone ?? 'Asia/Karachi',
         modules: organization.localeSettings?.enabledModules ?? ['performance', 'training', 'recruitment'],
         kpiScoring: organization.localeSettings?.kpiScoring ?? 'BOTH',
+        fieldTracking: !!organization.fieldTrackingSince,
       },
       involvement: { recruiting: hiringOrInterviewing > 0, onboarding: onboardingTasks > 0 },
       companies: await this.companies(userId),

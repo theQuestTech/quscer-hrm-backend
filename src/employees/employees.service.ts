@@ -130,6 +130,7 @@ export class EmployeesService {
           checkInMethod: dto.checkInMethod ?? null,
           requireOfficeNetwork: dto.requireOfficeNetwork ?? null,
           requireOfficeLocation: dto.requireOfficeLocation ?? null,
+          fieldStaff: dto.fieldStaff ?? false,
         },
       });
     } catch (e: any) {

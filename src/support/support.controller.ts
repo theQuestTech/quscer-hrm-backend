@@ -7,7 +7,7 @@ import { SupportService } from './support.service';
 import { SupportTwoStepService } from './support-two-step';
 import { TicketsService } from './tickets.service';
 import {
-  AddAgentDto, AgentReplyDto, SupportForgotDto, SupportLoginDto, SupportLoginTwoStepDto, SupportResetDto, SupportTwoStepConfirmDto, SuspendDto, TicketStatusDto, UpdateAgentDto, ViewAsDto,
+  AddAgentDto, AgentReplyDto, SupportForgotDto, SupportLoginDto, SupportLoginTwoStepDto, SupportResetDto, SupportTwoStepConfirmDto, SuspendDto, FieldTrackingDto, TicketStatusDto, UpdateAgentDto, ViewAsDto,
 } from './dto';
 
 const signInPerVisitor = new RateLimiter(20, 15 * 60 * 1000);
@@ -117,6 +117,13 @@ export class SupportController {
   @HttpCode(200)
   resume(@Req() req: any, @Param('id') id: string) {
     return this.support.resume(req.agent, id);
+  }
+
+  // The field tracking add-on, on or off for one company.
+  @Post('companies/:id/field-tracking')
+  @HttpCode(200)
+  fieldTracking(@Req() req: any, @Param('id') id: string, @Body() dto: FieldTrackingDto) {
+    return this.support.setFieldTracking(req.agent, id, dto.on);
   }
 
   @Post('companies/:id/users/:userId/reset-link')

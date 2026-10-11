@@ -30,6 +30,9 @@ model Organization {
   suspendedReason      String?
   // Two-step sign-in for everyone here, not just people who handle pay (HR's choice).
   requireTwoStepForAll Boolean   @default(false)
+  // Field tracking add-on, switched on by Quscer support (null = off). While
+  // off, nothing is recorded and the screens are hidden.
+  fieldTrackingSince   DateTime?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
@@ -273,6 +276,10 @@ model OrganizationLocaleSettings {
   // Email people about leave, payslips, training, candidates and expiring
   // documents/certificates.
   emailNotificationsEnabled    Boolean  @default(true)
+  // Field tracking (when the add-on is on): how often a field person's phone
+  // sends its position while they're checked in, and how long positions are kept.
+  trackingIntervalMinutes      Int      @default(5)
+  trackingKeepDays             Int      @default(90)
   updatedAt                    DateTime @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id])
@@ -545,6 +552,9 @@ model Employee {
   checkInMethod         String? // APP, MACHINE, BOTH
   requireOfficeNetwork  Boolean?
   requireOfficeLocation Boolean?
+  // Field staff: their phone shares its position while they're checked in
+  // (only when the company has field tracking).
+  fieldStaff            Boolean  @default(false)
   phone                 String?
   designation           String // job title, free text for now
 
@@ -1666,4 +1676,55 @@ model PendingBankDetailChange {
   createdAt          DateTime         @default(now())
 
   @@index([organizationId, status])
+}
+
+// --- Field tracking (add-on) -------------------------------------------------
+// Only for employees marked as field staff, only while they're checked in.
+
+// One position from the phone. Sent in batches; a phone that was offline
+// sends what it saved once it's back.
+model LocationPing {
+  id             String   @id @default(cuid())
+  organizationId String
+  employeeId     String
+  at             DateTime // when the phone took it
+  latitude       Float
+  longitude      Float
+  accuracy       Float? // metres
+  battery        Int? // percent
+  receivedAt     DateTime @default(now())
+
+  @@unique([employeeId, at]) // a resent batch doesn't double up
+  @@index([organizationId, employeeId, at])
+  @@index([at])
+}
+
+// A stop the person marked themselves: "I'm at a client".
+model FieldVisit {
+  id             String    @id @default(cuid())
+  organizationId String
+  employeeId     String
+  arrivedAt      DateTime
+  leftAt         DateTime?
+  latitude       Float
+  longitude      Float
+  accuracy       Float?
+  place          String // client or place name
+  notes          String?
+  createdAt      DateTime  @default(now())
+
+  @@index([organizationId, employeeId, arrivedAt])
+}
+
+// The phone telling us it can't share position: location switched off,
+// permission taken away, or back on.
+model TrackingEvent {
+  id             String   @id @default(cuid())
+  organizationId String
+  employeeId     String
+  at             DateTime
+  kind           String // LOCATION_OFF, LOCATION_ON, PERMISSION_DENIED
+  receivedAt     DateTime @default(now())
+
+  @@index([organizationId, employeeId, at])
 }
