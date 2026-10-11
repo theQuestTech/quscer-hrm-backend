@@ -21,6 +21,7 @@ import { AttendanceDevicesModule } from './attendance-devices/devices.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SupportModule } from './support/support.module';
 import { ActivityModule } from './activity/activity.module';
+import { TrackingModule } from './tracking/tracking.module';
 
 import { EnvironmentController } from './common/environment.controller';
 
@@ -48,6 +49,7 @@ import { EnvironmentController } from './common/environment.controller';
     NotificationsModule,
     SupportModule,
     ActivityModule,
+    TrackingModule,
   ],
   controllers: [EnvironmentController],
 })

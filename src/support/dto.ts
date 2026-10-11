@@ -47,6 +47,10 @@ export class SuspendDto {
   @Transform(trim) @IsString() @MinLength(3) @MaxLength(500) reason: string;
 }
 
+export class FieldTrackingDto {
+  @IsBoolean() on: boolean;
+}
+
 export class ViewAsDto {
   @IsString() @MaxLength(40) organizationId: string;
   @Transform(trim) @IsString() @MinLength(3) @MaxLength(300) reason: string;

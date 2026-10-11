@@ -99,4 +99,10 @@ export class CreateEmployeeDto extends PersonalDetailsDto {
   @IsOptional()
   @IsBoolean()
   requireOfficeLocation?: boolean | null;
+
+  // Field staff: their phone shares its position while checked in (only when
+  // the company has the field tracking add-on).
+  @IsOptional()
+  @IsBoolean()
+  fieldStaff?: boolean;
 }

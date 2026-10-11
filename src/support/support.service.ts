@@ -175,6 +175,7 @@ export class SupportService {
       createdAt: org.createdAt,
       suspendedAt: org.suspendedAt,
       suspendedReason: org.suspendedReason,
+      fieldTrackingSince: org.fieldTrackingSince,
       timezone: s?.defaultTimezone ?? 'Asia/Karachi',
       employees,
       branches,
@@ -221,6 +222,16 @@ export class SupportService {
     forgetOrgStatus(organizationId);
     await this.record(agent, 'company.resumed', organizationId, null, {});
     return { ok: true };
+  }
+
+  // Field tracking add-on. Switching it off stops new positions and hides the
+  // screens; what was recorded is kept until its keep period runs out.
+  async setFieldTracking(agent: SupportCaller, organizationId: string, on: boolean) {
+    const org = await this.org(organizationId);
+    if (!!org.fieldTrackingSince === on) throw new BadRequestException(on ? 'Field tracking is already on' : 'Field tracking is already off');
+    await this.prisma.organization.update({ where: { id: organizationId }, data: { fieldTrackingSince: on ? new Date() : null } });
+    await this.record(agent, on ? 'company.field_tracking_on' : 'company.field_tracking_off', organizationId, null, {});
+    return { ok: true, on };
   }
 
   // Emails the person a one-hour "choose a new password" link. Support never
