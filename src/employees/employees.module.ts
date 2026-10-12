@@ -7,11 +7,13 @@ import { EmployeesService } from './employees.service';
 import { PhotoController } from './photo.controller';
 import { MeController } from './me.controller';
 import { BankChangesController } from './bank-changes.controller';
+import { UsersModule } from '../users/users.module';
+import { EmployeeImportService } from './employee-import.service';
 
 @Module({
-  imports: [AuthModule, RbacModule, AttendanceDevicesModule],
+  imports: [AuthModule, RbacModule, AttendanceDevicesModule, UsersModule],
   controllers: [EmployeesController, PhotoController, MeController, BankChangesController],
-  providers: [EmployeesService],
+  providers: [EmployeesService, EmployeeImportService],
   exports: [EmployeesService],
 })
 export class EmployeesModule {}

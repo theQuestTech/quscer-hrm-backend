@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -25,11 +26,38 @@ import { QueryEmployeesDto } from './dto/query-employees.dto';
 import { CreateEmergencyContactDto } from './dto/create-emergency-contact.dto';
 import { CreateEmployeeDocumentDto, UploadEmployeeDocumentDto } from './dto/create-employee-document.dto';
 import { UpsertBankDetailDto } from './dto/upsert-bank-detail.dto';
+import { ImportEmployeesDto } from './dto/import-employees.dto';
+import { EmployeeImportService } from './employee-import.service';
+import { COLUMNS } from './import-rules';
 
 @Controller('employees')
 @UseGuards(JwtAuthGuard, PermissionGuard)
 export class EmployeesController {
-  constructor(private employeesService: EmployeesService) {}
+  constructor(
+    private employeesService: EmployeesService,
+    private importer: EmployeeImportService,
+  ) {}
+
+  // Bulk import: the columns the template has, a check of the rows (nothing
+  // saved), then the import itself (everyone, or nobody if a row is wrong).
+  @Get('import/columns')
+  @RequirePermission('hrm.employee.write')
+  importColumns() {
+    return COLUMNS.map(({ key, header, required, aliases }) => ({ key, header, required: !!required, aliases: aliases ?? [] }));
+  }
+
+  @Post('import/check')
+  @HttpCode(200)
+  @RequirePermission('hrm.employee.write')
+  checkImport(@Req() req: any, @Body() dto: ImportEmployeesDto) {
+    return this.importer.preview(req.user, dto.rows);
+  }
+
+  @Post('import')
+  @RequirePermission('hrm.employee.write')
+  runImport(@Req() req: any, @Body() dto: ImportEmployeesDto) {
+    return this.importer.run(req, dto.rows, !!dto.giveLogin);
+  }
 
   @Post()
   @RequirePermission('hrm.employee.write')
