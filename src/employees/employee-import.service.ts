@@ -11,7 +11,7 @@ import { PunchService } from '../attendance-devices/punch.service';
 import { UsersService } from '../users/users.service';
 import { hasPermission } from '../rbac/rbac.service';
 import { normalizeMachineId } from '../attendance-devices/punch-rules';
-import { CheckedRow, ImportRow, MAX_ROWS, checkRows } from './import-rules';
+import { CheckedRow, ImportRow, MAX_ROWS, checkRows, columnFor } from './import-rules';
 
 type Caller = { id: string; organizationId: string; permissions?: string[] };
 
@@ -37,8 +37,17 @@ export class EmployeeImportService {
       this.prisma.shift.findMany({ where: { organizationId }, select: { id: true, name: true } }),
       this.prisma.employee.findMany({ where: { organizationId }, select: { id: true, employeeNumber: true, email: true, cnic: true, machineUserId: true } }),
     ]);
+    // Columns may come under the spreadsheet's own headings ("Emp ID", "DOJ"…).
+    const keyed = rows.map((r) => {
+      const out: ImportRow = {};
+      for (const [k, v] of Object.entries(r)) {
+        const key = columnFor(k) ?? k;
+        if (out[key] === undefined || !out[key]?.toString().trim()) out[key] = v == null ? undefined : String(v);
+      }
+      return out;
+    });
     // Machines send "00012" for "12": compare them the same way the app stores them.
-    const normalised = rows.map((r) => (r.machineUserId?.trim() ? { ...r, machineUserId: normalizeMachineId(r.machineUserId) } : r));
+    const normalised = keyed.map((r) => (r.machineUserId?.trim() ? { ...r, machineUserId: normalizeMachineId(r.machineUserId) } : r));
     const checked = checkRows(normalised, { branches, departments, shifts, existing });
 
     // Salary needs payroll access, like on the employee page.
