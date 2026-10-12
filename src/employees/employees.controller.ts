@@ -43,7 +43,7 @@ export class EmployeesController {
   @Get('import/columns')
   @RequirePermission('hrm.employee.write')
   importColumns() {
-    return COLUMNS.map(({ key, header, required }) => ({ key, header, required: !!required }));
+    return COLUMNS.map(({ key, header, required, aliases }) => ({ key, header, required: !!required, aliases: aliases ?? [] }));
   }
 
   @Post('import/check')
