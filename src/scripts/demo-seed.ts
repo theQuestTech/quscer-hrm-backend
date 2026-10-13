@@ -33,6 +33,7 @@ import { FeedService } from '../feed/feed.service';
 import { computeShiftMetrics } from '../attendance/shift-metrics';
 import { normalizeBackupCode } from '../two-step/totp';
 import { isStaging } from '../common/environment';
+import { FIELD_STAFF, fillDay, simulateNow } from '../support/demo-tracking';
 
 export const DEMO = {
   companyName: 'Al-Noor Traders (Demo)',
@@ -545,6 +546,27 @@ async function removeExisting(app: App) {
   log('Cleared the old demo company (kept, renamed and suspended, with its activity record)');
 }
 
+/** Step 6: the field tracking add-on — on for the demo company, with five field staff and
+ *  their routes around Karachi for the last week; today is kept going on staging. */
+async function fieldTracking(app: App, c: Awaited<ReturnType<typeof company>>) {
+  const prisma = app.get(PrismaService);
+  const organizationId = c.organizationId;
+  await prisma.organization.update({ where: { id: organizationId }, data: { fieldTrackingSince: new Date() } });
+  await prisma.employee.updateMany({ where: { organizationId, employeeNumber: { in: FIELD_STAFF } }, data: { fieldStaff: true } });
+  const staff = await prisma.employee.findMany({ where: { organizationId, employeeNumber: { in: FIELD_STAFF } }, select: { id: true, employeeNumber: true } });
+  let points = 0;
+  for (const e of staff) {
+    const days = await prisma.attendanceRecord.findMany({
+      where: { employeeId: e.id, checkIn: { not: null }, checkOut: { not: null } },
+      orderBy: { date: 'desc' },
+      take: 5,
+    });
+    for (const d of days) points += (await fillDay(prisma, organizationId, e, d.checkIn!, d.checkOut!)).points;
+  }
+  points += (await simulateNow(prisma, organizationId)).points;
+  log(`Field tracking: on, ${staff.length} field staff, ${points} positions over the last week`);
+}
+
 export async function buildDemo(app: App, opts: { reset: boolean }) {
   steps = [];
   const prisma = app.get(PrismaService);
@@ -558,6 +580,7 @@ export async function buildDemo(app: App, opts: { reset: boolean }) {
   await leaveAndAttendance(app, c, staff);
   await runPayroll(app, c);
   await theRest(app, c, staff);
+  await fieldTracking(app, c);
   log(`Done. HR admin: ${DEMO.hr.email} / ${DEMO.password} (authenticator key ${DEMO.totpSecret})`);
   log(`Manager: ${DEMO.manager}, employee: ${DEMO.employee} — same password, no two-step`);
   return { built: true, organizationId: c.organizationId, steps };
